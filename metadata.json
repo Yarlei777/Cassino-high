@@ -1,0 +1,6 @@
+{
+  "name": "Costa Roulette",
+  "description": "Slim & Premium mobile-oriented roulette analyzer. Features advanced mathematical forecasting algorithms (Dealer Spacing, Cylinder Sectors, Hot Terminals) with three streamlined tabs and detailed Green/Red win/loss historical logs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
