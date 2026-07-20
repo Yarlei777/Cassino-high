@@ -1945,37 +1945,76 @@ export function getAutoPilotRecommendation(
   isGerminating?: boolean;
   pullConvergence?: PullConvergenceResult | null;
 } {
-  // Construct a cache key based on the parameters and history sequence (including spin direction)
-  const historyKey = historyEntries.map(e => `${e.number}_${e.ballDirection || 'cw'}`).join(',');
-  const cacheKey = `${targetCountInput}_${neighborRangeInput}_${engineFilterMode}_${dealerChangeRoundCount}_${nextBallDirection || 'none'}_${provider}_${historyKey}`;
+  try {
+    // Construct a cache key based on the parameters and history sequence (including spin direction)
+    const historyKey = historyEntries.map(e => {
+      if (!e) return '0_cw';
+      return `${e.number}_${e.ballDirection || 'cw'}`;
+    }).join(',');
+    const cacheKey = `${targetCountInput}_${neighborRangeInput}_${engineFilterMode}_${dealerChangeRoundCount}_${nextBallDirection || 'none'}_${provider}_${historyKey}`;
 
-  if (recommendationCache.has(cacheKey)) {
-    return recommendationCache.get(cacheKey);
+    if (recommendationCache.has(cacheKey)) {
+      return recommendationCache.get(cacheKey);
+    }
+
+    const baseRec = getAutoPilotRecommendationInternal(
+      historyEntries,
+      targetCountInput,
+      neighborRangeInput,
+      engineFilterMode,
+      dealerChangeRoundCount,
+      nextBallDirection,
+      provider
+    );
+    const result = applyDealerChangeAdjustment(
+      baseRec,
+      historyEntries.filter(e => e !== undefined).map(e => e.number),
+      targetCountInput,
+      dealerChangeRoundCount
+    );
+
+    // Keep cache size bounded to prevent any memory growth issues
+    if (recommendationCache.size > 2000) {
+      recommendationCache.clear();
+    }
+    recommendationCache.set(cacheKey, result);
+
+    return result;
+  } catch (err) {
+    console.error("Critical error inside getAutoPilotRecommendation:", err);
+    
+    // Ensure we always return a standard valid object to prevent crashes upstream in React rendering
+    const fallbackMetrics: EnginePerformance[] = Array.from({ length: 14 }, (_, i) => {
+      const id = i + 1;
+      return {
+        id,
+        name: `Motor ${id}`,
+        hits: 0,
+        total: 0,
+        rate: 0,
+        weight: id === 4 ? 6.0 : 0.0,
+        status: id === 4 ? 'Alta Eficiência' : 'Pausado (Filtro)',
+      };
+    });
+
+    return {
+      targets: [21, 14, 26],
+      neighborRange: neighborRangeInput,
+      strategyLabel: '🌱 MODO DE SEGURANÇA (KP)',
+      reasoning: 'Ocorreu um erro interno no processador de padrões de IA. O sistema ativou o Modo de Segurança automático para proteger a integridade do app.',
+      winProbability: 50,
+      triggerType: 'default_ai',
+      engineMetrics: fallbackMetrics,
+      entrySignal: 'AGUARDAR CONFIRMAÇÃO',
+      entryReason: 'O processador de IA se recuperou de um erro inesperado. Continue adicionando números normalmente.',
+      targetSelectionMode: 'Concentrado',
+      isHoraDeJogar: false,
+      prevStrongestTarget: null,
+      isSecondPayFilterActive: false,
+      isGerminating: false,
+      pullConvergence: null
+    };
   }
-
-  const baseRec = getAutoPilotRecommendationInternal(
-    historyEntries,
-    targetCountInput,
-    neighborRangeInput,
-    engineFilterMode,
-    dealerChangeRoundCount,
-    nextBallDirection,
-    provider
-  );
-  const result = applyDealerChangeAdjustment(
-    baseRec,
-    historyEntries.map(e => e.number),
-    targetCountInput,
-    dealerChangeRoundCount
-  );
-
-  // Keep cache size bounded to prevent any memory growth issues
-  if (recommendationCache.size > 2000) {
-    recommendationCache.clear();
-  }
-  recommendationCache.set(cacheKey, result);
-
-  return result;
 }
 
 function getAutoPilotRecommendationInternal(

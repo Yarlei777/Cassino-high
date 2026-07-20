@@ -39,6 +39,7 @@ import HistoryPanel, { HistoryEntry } from './components/HistoryPanel';
 import MetricsPanel from './components/MetricsPanel';
 import PatternDetector from './components/PatternDetector';
 import { getAutoPilotRecommendation, calculateHotColdStats, calculateTableStability } from './lib/patterns';
+import { getVibrationalComponents } from './lib/vibration';
 import {
   CYLINDER,
   getNeighbors,
@@ -84,7 +85,10 @@ export default function App() {
       const saved = localStorage.getItem('roulette_history');
       if (saved) {
         try {
-          return JSON.parse(saved);
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            return parsed.slice(0, 150);
+          }
         } catch (e) {
           console.error('Error parsing saved history:', e);
         }
@@ -349,15 +353,45 @@ export default function App() {
 
   // Calculate dynamic AI Auto-Pilot recommendation when active
   const aiRecommendation = useMemo(() => {
-    return getAutoPilotRecommendation(
-      history,
-      targetCount,
-      neighborRange,
-      engineFilterMode,
-      dealerChangeRoundCount,
-      ballDirection,
-      provider
-    );
+    try {
+      return getAutoPilotRecommendation(
+        history,
+        targetCount,
+        neighborRange,
+        engineFilterMode,
+        dealerChangeRoundCount,
+        ballDirection,
+        provider
+      );
+    } catch (err) {
+      console.error("Critical error in aiRecommendation useMemo:", err);
+      // Clean fallback matching structure
+      return {
+        targets: [21, 14, 26],
+        neighborRange: neighborRange,
+        strategyLabel: '🌱 MODO DE SEGURANÇA (KP)',
+        reasoning: 'Ocorreu um erro interno no processador de padrões de IA. O sistema ativou o Modo de Segurança automático para proteger a integridade do app.',
+        winProbability: 50,
+        triggerType: 'default_ai' as const,
+        engineMetrics: Array.from({ length: 14 }, (_, i) => ({
+          id: i + 1,
+          name: `Motor ${i + 1}`,
+          hits: 0,
+          total: 0,
+          rate: 0,
+          weight: i === 3 ? 6.0 : 0.0,
+          status: i === 3 ? 'Alta Eficiência' : 'Pausado (Filtro)',
+        })),
+        entrySignal: 'AGUARDAR CONFIRMAÇÃO' as const,
+        entryReason: 'O processador de IA se recuperou de um erro inesperado. Continue adicionando números normalmente.',
+        targetSelectionMode: 'Concentrado' as const,
+        isHoraDeJogar: false,
+        prevStrongestTarget: null,
+        isSecondPayFilterActive: false,
+        isGerminating: false,
+        pullConvergence: null
+      };
+    }
   }, [history, targetCount, neighborRange, engineFilterMode, dealerChangeRoundCount, ballDirection, provider]);
 
   // Calculate table stability index based on historic sequences
@@ -751,7 +785,7 @@ export default function App() {
     });
 
     if (overwrite) {
-      setHistory(newEntries);
+      setHistory(newEntries.slice(0, 150));
       setManualTargets([]);
       setIsGaleActive(false);
       setGaleTargets([]);
@@ -850,7 +884,7 @@ export default function App() {
     }
     
     setCurrentBankroll(simulatedBankroll);
-    setHistory(demoEntries);
+    setHistory(demoEntries.slice(0, 150));
   };
 
   // Seeding is now done manually via the "Preencher Dados de Teste" button so users start with a clean state on reload if they choose.
@@ -866,8 +900,65 @@ export default function App() {
     const startIdx = Math.max(0, reversed.length - 15);
 
     const evaluated = reversed.map((entry, idx) => {
-      if (idx < startIdx) {
-        // For older items, use their static, saved-on-input values to save huge CPU cycles
+      try {
+        if (idx < startIdx) {
+          // For older items, use their static, saved-on-input values to save huge CPU cycles
+          return {
+            ...entry,
+            dynamicTargets: entry.targets || [],
+            dynamicCovered: entry.coveredNumbers || [],
+            dynamicIsHit: entry.isWin || false,
+            hasDynamicPrediction: (entry.targets && entry.targets.length > 0) || false,
+          };
+        }
+
+        const preceding = reversed.slice(0, idx).reverse();
+        
+        let targets: number[] = [];
+        let range = neighborRange;
+        let hasPrediction = false;
+
+        if (preceding.length > 0) {
+          if (targetStrategy === 'ai') {
+            const rec = getAutoPilotRecommendation(
+              preceding,
+              targetCount,
+              neighborRange,
+              engineFilterMode,
+              dealerChangeRoundCount,
+              entry.ballDirection || 'cw',
+              provider
+            );
+            if (rec && !rec.isGerminating && rec.targets && rec.targets.length > 0) {
+              targets = rec.targets;
+              range = rec.neighborRange;
+              hasPrediction = true;
+            }
+          } else if (targetStrategy !== 'manual') {
+            const precedingNumbers = preceding.map(e => e.number);
+            targets = suggestTargets(precedingNumbers, targetCount, targetStrategy);
+            range = neighborRange;
+            hasPrediction = targets.length > 0;
+          }
+        }
+
+        let isHit = false;
+        let coveredNumbers: number[] = [];
+        if (hasPrediction) {
+          const coverage = getStrategyCoverage(targets, range);
+          coveredNumbers = coverage.coveredNumbers;
+          isHit = coveredNumbers.includes(entry.number);
+        }
+
+        return {
+          ...entry,
+          dynamicTargets: targets,
+          dynamicCovered: coveredNumbers,
+          dynamicIsHit: isHit,
+          hasDynamicPrediction: hasPrediction,
+        };
+      } catch (err) {
+        console.error("Error evaluating history entry at index:", idx, err);
         return {
           ...entry,
           dynamicTargets: entry.targets || [],
@@ -876,52 +967,6 @@ export default function App() {
           hasDynamicPrediction: (entry.targets && entry.targets.length > 0) || false,
         };
       }
-
-      const preceding = reversed.slice(0, idx).reverse();
-      
-      let targets: number[] = [];
-      let range = neighborRange;
-      let hasPrediction = false;
-
-      if (preceding.length > 0) {
-        if (targetStrategy === 'ai') {
-          const rec = getAutoPilotRecommendation(
-            preceding,
-            targetCount,
-            neighborRange,
-            engineFilterMode,
-            dealerChangeRoundCount,
-            entry.ballDirection || 'cw',
-            provider
-          );
-          if (!rec.isGerminating && rec.targets && rec.targets.length > 0) {
-            targets = rec.targets;
-            range = rec.neighborRange;
-            hasPrediction = true;
-          }
-        } else if (targetStrategy !== 'manual') {
-          const precedingNumbers = preceding.map(e => e.number);
-          targets = suggestTargets(precedingNumbers, targetCount, targetStrategy);
-          range = neighborRange;
-          hasPrediction = targets.length > 0;
-        }
-      }
-
-      let isHit = false;
-      let coveredNumbers: number[] = [];
-      if (hasPrediction) {
-        const coverage = getStrategyCoverage(targets, range);
-        coveredNumbers = coverage.coveredNumbers;
-        isHit = coveredNumbers.includes(entry.number);
-      }
-
-      return {
-        ...entry,
-        dynamicTargets: targets,
-        dynamicCovered: coveredNumbers,
-        dynamicIsHit: isHit,
-        hasDynamicPrediction: hasPrediction,
-      };
     });
 
     return evaluated.reverse();
@@ -1775,6 +1820,68 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+
+                {/* NOVO: Sinergia Vibracional de Dígitos 1-9 (Último Giro) */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 w-full max-w-[340px] space-y-2.5 shadow-sm relative overflow-hidden">
+                  <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent pointer-events-none" />
+                  
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
+                    <span className="text-[9px] text-zinc-400 uppercase tracking-widest font-black flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                      Sinergia Vibracional de Dígitos
+                    </span>
+                    <span className="text-[7.5px] bg-purple-500/10 border border-purple-500/30 text-purple-300 px-1.5 py-0.2 rounded font-black font-mono uppercase">
+                      REDUÇÃO 1-9
+                    </span>
+                  </div>
+
+                  {history.length > 0 ? (
+                    (() => {
+                      const lastVal = history[0].number;
+                      const vibe = getVibrationalComponents(lastVal);
+                      const isRed = COLORS[lastVal] === 'red';
+                      const isBlack = COLORS[lastVal] === 'black';
+                      const colorBg = isRed ? 'bg-red-600' : isBlack ? 'bg-slate-800' : 'bg-emerald-600';
+                      
+                      return (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-2">
+                            <span className={`w-7 h-7 rounded-full flex items-center justify-center font-mono font-black text-white text-xs shadow-sm ${colorBg}`}>
+                              {vibe.original}
+                            </span>
+                            <div className="text-left flex-1">
+                              <span className="text-[7.5px] text-zinc-500 font-extrabold uppercase block leading-none">Número Base</span>
+                              <span className="text-[10px] font-black text-zinc-300 block mt-0.5">
+                                Dígitos: <span className="text-purple-400 font-mono">{vibe.digits.join(' e ')}</span>
+                                {vibe.digits.length > 1 && <> • Soma: <span className="text-purple-400 font-mono">{vibe.sum}</span></>}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="bg-zinc-950 p-2 rounded border border-zinc-850 flex items-center justify-between gap-1.5">
+                            <span className="text-[8px] text-zinc-500 font-black uppercase shrink-0">Vibrações Ativas:</span>
+                            <div className="flex gap-1 flex-wrap">
+                              {vibe.allVibrations.map((v) => (
+                                <span key={`live-vibe-${v}`} className="px-1.5 py-0.5 bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded font-mono font-black text-[9px]">
+                                  {v}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+
+                          <p className="text-[7.5px] text-zinc-500 font-mono leading-relaxed">
+                            💡 O número <span className="text-zinc-300 font-bold">{lastVal}</span> vibra na junção dos algarismos {vibe.allVibrations.join(', ')}. Isso ativa a atração harmônica com terminais correspondentes nas próximas rodadas.
+                          </p>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    <div className="text-center py-4 text-[8px] text-zinc-500 italic">
+                      Aguardando primeiro giro para mapear a assinatura de vibração de dígitos...
+                    </div>
+                  )}
+                </div>
+
               </div>
  
               <div className="lg:col-span-7 w-full">
