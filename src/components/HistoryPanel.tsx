@@ -39,10 +39,69 @@ export default function HistoryPanel({ history, onClearHistory, onGenerateDemoDa
   const [filterStrategy, setFilterStrategy] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
-  // Calculate advanced stats
+  // Calculate advanced stats safely
   const stats = useMemo(() => {
-    const entriesWithPredictions = history.filter((h) => (h.coveredNumbers && h.coveredNumbers.length > 0) || (h as any).hasDynamicPrediction);
-    if (entriesWithPredictions.length === 0) {
+    try {
+      const safeHistory = Array.isArray(history) 
+        ? history.filter((h) => h && typeof h === 'object' && typeof h.number === 'number') 
+        : [];
+
+      const entriesWithPredictions = safeHistory.filter((h) => 
+        (h.coveredNumbers && h.coveredNumbers.length > 0) || 
+        (h as any).hasDynamicPrediction
+      );
+
+      if (entriesWithPredictions.length === 0) {
+        return {
+          total: 0,
+          wins: 0,
+          losses: 0,
+          rate: 0,
+          currentStreak: 0,
+          maxStreak: 0,
+        };
+      }
+
+      // Total spins that had predictions
+      const total = entriesWithPredictions.length;
+
+      // Rate is calculated using all predictions (as requested by user: "pode contar todos os giros")
+      const winsForRate = entriesWithPredictions.filter((h) => h.isWin || (h as any).dynamicIsHit).length;
+      const rate = total > 0 ? Math.round((winsForRate / total) * 100) : 0;
+
+      // Greens and Reds are counted ONLY when the analysis lighted up (wasPlayed === true)
+      const wins = entriesWithPredictions.filter((h) => h.wasPlayed && (h.isWin || (h as any).dynamicIsHit)).length;
+      const losses = entriesWithPredictions.filter((h) => h.wasPlayed && !(h.isWin || (h as any).dynamicIsHit)).length;
+
+      // Calculate streaks chronologically (history[0] is newest, so reverse it for forward streak)
+      let currentStreak = 0;
+      let maxStreak = 0;
+      let tempStreak = 0;
+
+      const cronList = [...entriesWithPredictions].reverse();
+      cronList.forEach((entry) => {
+        const hit = entry.isWin || (entry as any).dynamicIsHit;
+        if (hit) {
+          tempStreak++;
+          maxStreak = Math.max(maxStreak, tempStreak);
+        } else {
+          tempStreak = 0;
+        }
+      });
+
+      // Current streak (counting backward from newest)
+      for (let i = 0; i < entriesWithPredictions.length; i++) {
+        const hit = entriesWithPredictions[i].isWin || (entriesWithPredictions[i] as any).dynamicIsHit;
+        if (hit) {
+          currentStreak++;
+        } else {
+          break;
+        }
+      }
+
+      return { total, wins, losses, rate, currentStreak, maxStreak };
+    } catch (e) {
+      console.error('Error calculating history stats in HistoryPanel:', e);
       return {
         total: 0,
         wins: 0,
@@ -52,39 +111,6 @@ export default function HistoryPanel({ history, onClearHistory, onGenerateDemoDa
         maxStreak: 0,
       };
     }
-
-    const total = entriesWithPredictions.length;
-    const wins = entriesWithPredictions.filter((h) => h.isWin || (h as any).dynamicIsHit).length;
-    const losses = entriesWithPredictions.filter((h) => !h.isWin && !(h as any).dynamicIsHit).length;
-    const rate = Math.round((wins / total) * 100);
-
-    // Calculate streaks chronologically (history[0] is newest, so reverse it for forward streak)
-    let currentStreak = 0;
-    let maxStreak = 0;
-    let tempStreak = 0;
-
-    const cronList = [...entriesWithPredictions].reverse();
-    cronList.forEach((entry) => {
-      const hit = entry.isWin || (entry as any).dynamicIsHit;
-      if (hit) {
-        tempStreak++;
-        maxStreak = Math.max(maxStreak, tempStreak);
-      } else {
-        tempStreak = 0;
-      }
-    });
-
-    // Current streak (counting backward from newest)
-    for (let i = 0; i < entriesWithPredictions.length; i++) {
-      const hit = entriesWithPredictions[i].isWin || (entriesWithPredictions[i] as any).dynamicIsHit;
-      if (hit) {
-        currentStreak++;
-      } else {
-        break;
-      }
-    }
-
-    return { total, wins, losses, rate, currentStreak, maxStreak };
   }, [history]);
 
   // Strategy naming map
@@ -101,18 +127,26 @@ export default function HistoryPanel({ history, onClearHistory, onGenerateDemoDa
     'AUTO-PILOT: Fusão de Gatilhos IA': 'Auto-Pilot (Gatilhos)',
   };
 
-  // Filtered history entries
+  // Filtered history entries safely
   const filteredHistory = useMemo(() => {
-    return history.filter((entry) => {
-      const matchStrategy = filterStrategy === 'all' || entry.strategyUsed === filterStrategy;
-      const matchSearch =
-        searchQuery === '' ||
-        entry.number.toString().includes(searchQuery) ||
-        (strategyLabelMap[entry.strategyUsed] || entry.strategyUsed)
-          .toLowerCase()
-          .includes(searchQuery.toLowerCase());
-      return matchStrategy && matchSearch;
-    });
+    try {
+      const safeHistory = Array.isArray(history) 
+        ? history.filter((h) => h && typeof h === 'object' && typeof h.number === 'number') 
+        : [];
+
+      return safeHistory.filter((entry) => {
+        const matchStrategy = filterStrategy === 'all' || entry.strategyUsed === filterStrategy;
+        const strategyLabel = strategyLabelMap[entry.strategyUsed || ''] || entry.strategyUsed || '';
+        const matchSearch =
+          searchQuery === '' ||
+          entry.number.toString().includes(searchQuery) ||
+          strategyLabel.toLowerCase().includes(searchQuery.toLowerCase());
+        return matchStrategy && matchSearch;
+      });
+    } catch (e) {
+      console.error('Error filtering history in HistoryPanel:', e);
+      return [];
+    }
   }, [history, filterStrategy, searchQuery]);
 
   return (

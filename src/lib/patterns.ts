@@ -2556,10 +2556,17 @@ function getAutoPilotRecommendationInternal(
         const subScores = evaluateEngine(engineId, subHist, subHistEntries, targetDir);
  
         // Calculate if the actual outcome was among the best targets scored by this engine
-        const topIndices = Array.from({ length: 37 }, (_, idx) => idx)
-          .filter(n => n !== subLast)
-          .sort((a, b) => subScores[b] - subScores[a])
-          .slice(0, 6); // Look at top 6 covers of that engine
+        // Optimization: only sort elements with score > 0 since outcome must have score > 0 to be a hit anyway.
+        const topIndices: number[] = [];
+        for (let num = 0; num <= 36; num++) {
+          if (num !== subLast && subScores[num] > 0) {
+            topIndices.push(num);
+          }
+        }
+        topIndices.sort((a, b) => subScores[b] - subScores[a]);
+        if (topIndices.length > 6) {
+          topIndices.length = 6;
+        }
  
         if (subScores[outcome] > 0 && topIndices.includes(outcome)) {
           engineHits[engineId]++;

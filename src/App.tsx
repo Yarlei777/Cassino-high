@@ -860,10 +860,10 @@ export default function App() {
 
   const evaluatedHistory = useMemo(() => {
     const reversed = [...history].reverse();
-    // Only calculate dynamic predictions for the most recent 35 items
+    // Only calculate dynamic predictions for the most recent 15 items
     // Since history has newest first, reversed has oldest first.
     // The most recent items in history are at the end of reversed.
-    const startIdx = Math.max(0, reversed.length - 35);
+    const startIdx = Math.max(0, reversed.length - 15);
 
     const evaluated = reversed.map((entry, idx) => {
       if (idx < startIdx) {
