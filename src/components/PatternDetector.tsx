@@ -456,26 +456,30 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                 </div>
               </div>
 
-              {/* Main Analysis Cards (Grid of Bate e Volta + Repetição) */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Main Analysis Cards (Grid of Bate e Volta de Região + Repetição de Região + Repetição de Terminal) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 
-                {/* CARD 1: BATE E VOLTA */}
+                {/* CARD 1: BATE E VOLTA DE REGIÃO E ALTERNÂNCIA */}
                 <div className={`border rounded-xl p-3.5 flex flex-col justify-between space-y-3 transition-all relative overflow-hidden ${
-                  simplePatterns.bateEVolta.active
-                    ? 'bg-emerald-50/70 border-emerald-200 text-emerald-950'
+                  simplePatterns.bateEVoltaRegiao.active || simplePatterns.bateEVolta.active
+                    ? 'bg-emerald-50/80 border-emerald-300 text-emerald-950 shadow-sm'
                     : 'bg-slate-50/70 border-slate-200 text-slate-500'
                 }`}>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-widest font-black text-slate-400">OPERACIONAL</span>
+                      <span className="text-[9px] uppercase tracking-widest font-black text-slate-400">ANÁLISE DE OSCILAÇÃO</span>
                       <h5 className="text-[11px] font-black uppercase text-slate-800 tracking-wide flex items-center gap-1.5">
-                        🔄 Bate e Volta (Alternância)
+                        🔄 Bate e Volta na Região
                       </h5>
                     </div>
-                    {simplePatterns.bateEVolta.active ? (
-                      <span className="text-[8px] bg-emerald-500 text-white font-black px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                    {simplePatterns.bateEVoltaRegiao.active ? (
+                      <span className="text-[8px] bg-emerald-600 text-white font-black px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1 animate-pulse">
                         <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
-                        ATIVO ({simplePatterns.bateEVolta.streak + 1} Giros)
+                        REGIÃO ({simplePatterns.bateEVoltaRegiao.streak}x)
+                      </span>
+                    ) : simplePatterns.bateEVolta.active ? (
+                      <span className="text-[8px] bg-emerald-500 text-white font-black px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1">
+                        CORES ({simplePatterns.bateEVolta.streak + 1}x)
                       </span>
                     ) : (
                       <span className="text-[8px] bg-slate-200 text-slate-400 font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">
@@ -484,15 +488,46 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                     )}
                   </div>
 
-                  {simplePatterns.bateEVolta.active ? (
+                  {simplePatterns.bateEVoltaRegiao.active ? (
                     <div className="space-y-2">
-                      <p className="text-[10px] text-slate-600 font-medium">
-                        O cilindro está alternando padrões de <strong>{simplePatterns.bateEVolta.description}</strong>.
+                      <p className="text-[10px] text-slate-700 font-bold">
+                        {simplePatterns.bateEVoltaRegiao.description}
                       </p>
                       
                       {/* Sequence tracker */}
-                      <div className="flex items-center gap-1.5 bg-white p-2 rounded-lg border border-slate-200 w-fit shadow-xs">
-                        <span className="text-[8px] text-slate-400 uppercase tracking-tighter font-extrabold">Sequência:</span>
+                      <div className="bg-white p-2 rounded-lg border border-slate-200 text-[9.5px] font-mono text-slate-700 space-y-1 shadow-xs">
+                        <div className="text-[8px] text-slate-400 uppercase font-black">Sequência da Oscilação:</div>
+                        <div className="flex flex-wrap gap-1">
+                          {simplePatterns.bateEVoltaRegiao.sequence.map((item, i) => (
+                            <span key={`bvr-seq-${i}`} className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded font-black text-[9px]">
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Entry advice */}
+                      <div className="bg-emerald-100/50 border border-emerald-300 rounded-lg p-2 text-left space-y-1">
+                        <span className="text-[8px] text-emerald-800 font-black uppercase tracking-wider block">Projeção de Rebote:</span>
+                        <div className="flex justify-between items-center gap-1.5">
+                          <span className="text-[10px] font-extrabold text-slate-900">{simplePatterns.bateEVoltaRegiao.recommendedSector}</span>
+                          <button
+                            onClick={() => onApplyTargets(simplePatterns.bateEVoltaRegiao.targets, 2, `Bate e Volta Região: ${simplePatterns.bateEVoltaRegiao.recommendedSector}`)}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[8.5px] uppercase tracking-wider py-1 px-2 rounded cursor-pointer transition-all shrink-0"
+                          >
+                            Ativar Alvos
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : simplePatterns.bateEVolta.active ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px] text-slate-600 font-medium">
+                        Alternância de <strong>{simplePatterns.bateEVolta.description}</strong>.
+                      </p>
+                      
+                      <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-slate-200 shadow-xs">
+                        <span className="text-[8px] text-slate-400 uppercase font-extrabold">Fluxo:</span>
                         <div className="flex gap-1">
                           {simplePatterns.bateEVolta.sequence.map((term, i) => (
                             <span key={`seq-term-${i}`} className="text-xs font-bold text-slate-700">{term}</span>
@@ -500,16 +535,14 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                         </div>
                       </div>
 
-                      {/* Entry advice */}
-                      <div className="bg-emerald-100/40 border border-emerald-200 rounded-lg p-2.5 text-left space-y-1">
-                        <span className="text-[8px] text-emerald-700 font-black uppercase tracking-wider">Jogada Recomendada:</span>
-                        <div className="flex justify-between items-center gap-2">
-                          <span className="text-[10.5px] font-bold text-slate-800">Seguir fluxo para {simplePatterns.bateEVolta.recommendedPlay}</span>
+                      <div className="bg-emerald-100/40 border border-emerald-200 rounded-lg p-2 text-left space-y-1">
+                        <div className="flex justify-between items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-slate-800">Seguir {simplePatterns.bateEVolta.recommendedPlay}</span>
                           <button
                             onClick={() => onApplyTargets(simplePatterns.bateEVolta.targets.slice(0, 5), 2, `Bate e Volta: ${simplePatterns.bateEVolta.recommendedPlay}`)}
-                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[9px] uppercase tracking-wider py-1 px-2.5 rounded cursor-pointer transition-all shrink-0"
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[8.5px] uppercase tracking-wider py-1 px-2 rounded cursor-pointer transition-all shrink-0"
                           >
-                            Ativar Alvos
+                            Ativar Cores
                           </button>
                         </div>
                       </div>
@@ -517,15 +550,8 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                   ) : (
                     <div className="space-y-2 py-1 text-left">
                       <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
-                        Nenhuma alternância crítica ativa no momento. O sistema está aguardando pelo menos 3 rodadas consecutivas de alternância entre cores ou paridade para sinalizar entrada.
+                        Aguardando oscilação consecutiva entre setores ou rebote físico na mesma área do cilindro.
                       </p>
-                      <div className="text-[9px] text-slate-400 font-mono italic">
-                        {simplePatterns.delays.colorStreakDelay >= 3 ? (
-                          <span className="text-amber-600 font-bold">🚨 Mesma cor repetindo há {simplePatterns.delays.colorStreakDelay} rodadas. Alternância atrasando!</span>
-                        ) : (
-                          <span>Cores consecutivas: {simplePatterns.delays.colorStreakDelay}x</span>
-                        )}
-                      </div>
                     </div>
                   )}
                 </div>
@@ -533,12 +559,12 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                 {/* CARD 2: REPETIÇÃO DE REGIÃO */}
                 <div className={`border rounded-xl p-3.5 flex flex-col justify-between space-y-3 transition-all relative overflow-hidden ${
                   simplePatterns.repeticaoRegiao.active
-                    ? 'bg-amber-50/70 border-amber-200 text-amber-950'
+                    ? 'bg-amber-50/80 border-amber-300 text-amber-950 shadow-sm'
                     : 'bg-slate-50/70 border-slate-200 text-slate-500'
                 }`}>
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
-                      <span className="text-[9px] uppercase tracking-widest font-black text-slate-400">OPERACIONAL</span>
+                      <span className="text-[9px] uppercase tracking-widest font-black text-slate-400">ANÁLISE DE ZONA</span>
                       <h5 className="text-[11px] font-black uppercase text-slate-800 tracking-wide flex items-center gap-1.5">
                         🎯 Repetição de Região
                       </h5>
@@ -557,23 +583,21 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
 
                   {simplePatterns.repeticaoRegiao.active ? (
                     <div className="space-y-2">
-                      <p className="text-[10px] text-slate-600 font-medium">
-                        A bola está se concentrando na região de: <strong>{simplePatterns.repeticaoRegiao.description}</strong>.
+                      <p className="text-[10px] text-slate-700 font-bold">
+                        {simplePatterns.repeticaoRegiao.description}
                       </p>
 
-                      {/* Region type details */}
-                      <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-[9px] font-mono text-slate-600 font-bold w-fit shadow-xs">
-                        Área ativa: {simplePatterns.repeticaoRegiao.sectorName} ({simplePatterns.repeticaoRegiao.streak}x consecutivas)
+                      <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-[9px] font-mono text-slate-700 font-bold shadow-xs">
+                        Área em repetição: <span className="text-amber-600 font-black">{simplePatterns.repeticaoRegiao.sectorName}</span> ({simplePatterns.repeticaoRegiao.streak}x)
                       </div>
 
-                      {/* Entry advice */}
-                      <div className="bg-amber-100/40 border border-amber-200 rounded-lg p-2.5 text-left space-y-1">
-                        <span className="text-[8px] text-amber-700 font-black uppercase tracking-wider">Jogada Recomendada:</span>
-                        <div className="flex justify-between items-center gap-2">
-                          <span className="text-[10.5px] font-bold text-slate-800">Cercar região para repetição de fluxo</span>
+                      <div className="bg-amber-100/50 border border-amber-300 rounded-lg p-2 text-left space-y-1">
+                        <span className="text-[8px] text-amber-800 font-black uppercase tracking-wider block">Cerco de Região:</span>
+                        <div className="flex justify-between items-center gap-1.5">
+                          <span className="text-[10px] font-extrabold text-slate-900">Seguir tendência de setor</span>
                           <button
-                            onClick={() => onApplyTargets(simplePatterns.repeticaoRegiao.targets.slice(0, 5), 2, `Repetição: ${simplePatterns.repeticaoRegiao.sectorName}`)}
-                            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[9px] uppercase tracking-wider py-1 px-2.5 rounded cursor-pointer transition-all shrink-0"
+                            onClick={() => onApplyTargets(simplePatterns.repeticaoRegiao.targets.slice(0, 6), 2, `Repetição Região: ${simplePatterns.repeticaoRegiao.sectorName}`)}
+                            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[8.5px] uppercase tracking-wider py-1 px-2 rounded cursor-pointer transition-all shrink-0"
                           >
                             Ativar Alvos
                           </button>
@@ -583,15 +607,66 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                   ) : (
                     <div className="space-y-2 py-1 text-left">
                       <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
-                        Nenhuma repetição física de setor ou quadrante detectada nos últimos giros. A roleta está mudando de área a cada rodada.
+                        Aguardando repetição física consecutiva no mesmo setor ou quadrante do cilindro.
                       </p>
-                      <div className="text-[9px] text-slate-400 font-mono italic">
-                        {simplePatterns.delays.sectorRepeatDelay >= 8 ? (
-                          <span className="text-red-500 font-bold">🚨 Sem repetição de setor há {simplePatterns.delays.sectorRepeatDelay} giros (Atrasado!)</span>
-                        ) : (
-                          <span>Giros desde última dobra: {simplePatterns.delays.sectorRepeatDelay}x</span>
-                        )}
+                    </div>
+                  )}
+                </div>
+
+                {/* CARD 3: REPETIÇÃO DE TERMINAL */}
+                <div className={`border rounded-xl p-3.5 flex flex-col justify-between space-y-3 transition-all relative overflow-hidden ${
+                  simplePatterns.repeticaoTerminal.active
+                    ? 'bg-purple-50/80 border-purple-300 text-purple-950 shadow-sm'
+                    : 'bg-slate-50/70 border-slate-200 text-slate-500'
+                }`}>
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <span className="text-[9px] uppercase tracking-widest font-black text-slate-400">ANÁLISE DE DÍGITOS</span>
+                      <h5 className="text-[11px] font-black uppercase text-slate-800 tracking-wide flex items-center gap-1.5">
+                        📌 Repetição de Terminal
+                      </h5>
+                    </div>
+                    {simplePatterns.repeticaoTerminal.active ? (
+                      <span className="text-[8px] bg-purple-600 text-white font-black px-1.5 py-0.5 rounded uppercase tracking-wider flex items-center gap-1 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-white"></span>
+                        TERMINAL {simplePatterns.repeticaoTerminal.terminal}
+                      </span>
+                    ) : (
+                      <span className="text-[8px] bg-slate-200 text-slate-400 font-extrabold px-1.5 py-0.5 rounded uppercase tracking-wider">
+                        Aguardando
+                      </span>
+                    )}
+                  </div>
+
+                  {simplePatterns.repeticaoTerminal.active ? (
+                    <div className="space-y-2">
+                      <p className="text-[10px] text-slate-700 font-bold">
+                        {simplePatterns.repeticaoTerminal.description}
+                      </p>
+
+                      <div className="bg-white p-1.5 rounded-lg border border-slate-200 text-[9px] font-mono text-slate-700 shadow-xs flex items-center gap-1">
+                        <span className="text-slate-400 font-bold">Saídas:</span>
+                        <span className="text-purple-600 font-black">{simplePatterns.repeticaoTerminal.sequence.join(' ➜ ')}</span>
                       </div>
+
+                      <div className="bg-purple-100/50 border border-purple-300 rounded-lg p-2 text-left space-y-1">
+                        <span className="text-[8px] text-purple-800 font-black uppercase tracking-wider block">Cerco de Terminal:</span>
+                        <div className="flex justify-between items-center gap-1.5">
+                          <span className="text-[10px] font-extrabold text-slate-900">Alvos final {simplePatterns.repeticaoTerminal.terminal}</span>
+                          <button
+                            onClick={() => onApplyTargets(simplePatterns.repeticaoTerminal.targets, 2, `Repetição Terminal ${simplePatterns.repeticaoTerminal.terminal}`)}
+                            className="bg-purple-600 hover:bg-purple-500 text-white font-black text-[8.5px] uppercase tracking-wider py-1 px-2 rounded cursor-pointer transition-all shrink-0"
+                          >
+                            Ativar Terminal
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2 py-1 text-left">
+                      <p className="text-[10px] text-slate-400 leading-relaxed font-medium">
+                        Aguardando repetição consecutiva ou frequência alta de um mesmo terminal nas últimas rodadas.
+                      </p>
                     </div>
                   )}
                 </div>
@@ -1360,14 +1435,29 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
 
                 {/* 3. Hot Numbers (Quentes / Frequentes) */}
                 <div className="bg-white border border-slate-200 rounded-xl p-3.5 space-y-3 shadow-xs">
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-1">
                     <h5 className="text-[10px] font-black text-emerald-600 uppercase tracking-wider flex items-center gap-1">
                       <Flame className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
                       Números Quentes (Alvos)
                     </h5>
-                    <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-black px-1.5 py-0.2 rounded font-mono shadow-xs">
-                      {hotColdStats.hotNumbers.length}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {hotColdStats.hotNumbers.length >= 2 && (
+                        <button
+                          onClick={() => {
+                            const top3 = hotColdStats.hotNumbers.slice(0, 3).map(h => h.number);
+                            onApplyTargets(top3, 3, `Top ${top3.length} Quentes (${top3.join(', ')})`);
+                          }}
+                          className="text-[8px] bg-gradient-to-r from-amber-500 to-emerald-600 hover:from-amber-600 hover:to-emerald-700 text-white font-black px-2 py-0.5 rounded-md uppercase tracking-wider cursor-pointer border border-amber-400 shadow-xs transition-all flex items-center gap-1"
+                          title="Abrir análise para os 3 números mais quentes da mesa"
+                        >
+                          <Flame className="w-2.5 h-2.5 fill-amber-200" />
+                          <span>Top 3 Quentes</span>
+                        </button>
+                      )}
+                      <span className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-black px-1.5 py-0.2 rounded font-mono shadow-xs">
+                        {hotColdStats.hotNumbers.length}
+                      </span>
+                    </div>
                   </div>
                   <p className="text-[9px] text-slate-400 font-medium text-left">
                     Números em alta frequência recente. Tendem a repetir ou puxar vizinhos próximos!
@@ -1396,7 +1486,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                             <span className="text-emerald-600 font-extrabold font-mono">{item.frequency}x</span>
                           </div>
                           <button
-                            onClick={() => onApplyTargets([item.number], 2, `Quente ${item.number}`)}
+                            onClick={() => onApplyTargets([item.number], 3, `Quente ${item.number}`)}
                             className="text-[8px] bg-emerald-500 hover:bg-emerald-600 text-white font-black px-2 py-1 rounded-md uppercase tracking-wider cursor-pointer border border-emerald-600 shadow-xs transition-all"
                           >
                             Cercar

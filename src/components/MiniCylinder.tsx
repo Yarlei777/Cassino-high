@@ -5,9 +5,10 @@ import { COLORS, CYLINDER } from '../lib/roulette';
 interface MiniCylinderProps {
   activeTargets: number[];
   coveredNumbers: number[];
+  yellowNumbers?: number[];
 }
 
-export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCylinderProps) {
+export default function MiniCylinder({ activeTargets, coveredNumbers, yellowNumbers = [] }: MiniCylinderProps) {
   const [viewMode, setViewMode] = useState<'racetrack' | 'table' | 'wheel'>('racetrack');
   const [isInvertCylinder, setIsInvertCylinder] = useState(false);
 
@@ -16,6 +17,7 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
   // High-fidelity styling based on the actual number state
   const getRenderChipStyles = (num: number, isTableLayout: boolean) => {
     const isTarget = activeTargets.includes(num);
+    const isYellow = yellowNumbers.includes(num);
     const isCovered = coveredNumbers.includes(num);
     const color = COLORS[num];
 
@@ -25,6 +27,15 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
         isTableLayout 
           ? 'bg-gradient-to-br from-amber-300 via-amber-400 to-amber-500 border-amber-200 ring-1 ring-amber-400/40 shadow-[0_0_8px_rgba(245,158,11,0.6)] scale-[1.08] rounded-md text-slate-950'
           : 'bg-gradient-to-br from-amber-300 via-amber-400 to-amber-500 border-amber-200 ring-1 ring-amber-400/50 shadow-[0_0_10px_rgba(245,158,11,0.8)] scale-[1.12] rounded-full z-20 animate-pulse text-slate-950'
+      }`;
+    }
+
+    // Yellow auxiliary target - soft yellow background and bold yellow border
+    if (isYellow) {
+      return `font-black border border-yellow-400 select-none transition-all duration-300 ${
+        isTableLayout
+          ? 'bg-yellow-100 text-yellow-800 border-yellow-300 shadow-[0_0_4px_rgba(234,179,8,0.3)] scale-[1.03] rounded-md'
+          : 'bg-yellow-100 text-yellow-800 border-yellow-300 shadow-[0_0_6px_rgba(234,179,8,0.4)] scale-[1.08] rounded-full z-15'
       }`;
     }
 
@@ -65,6 +76,11 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
           {coveredNumbers.length > 0 && (
             <span className="text-[8px] sm:text-[9px] bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded text-emerald-700 font-mono font-black shadow-xs">
               Cob: {coveragePercentage}% ({coveredNumbers.length}/37)
+            </span>
+          )}
+          {yellowNumbers.length > 0 && (
+            <span className="text-[8px] sm:text-[9px] bg-yellow-50 border border-yellow-200 px-1.5 py-0.5 rounded text-yellow-700 font-mono font-black shadow-xs" title="Vizinhos de órbita e preenchimento de buracos (Gap fill)">
+              ⚠️ Sinergia: {yellowNumbers.length} Amarelos
             </span>
           )}
         </div>
@@ -228,6 +244,7 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
                  const ey = 125 + 70 * Math.sin(angle);
 
                 const isTarget = activeTargets.includes(num);
+                const isYellow = yellowNumbers.includes(num);
                 const isCovered = coveredNumbers.includes(num);
                 const color = COLORS[num];
 
@@ -248,7 +265,18 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
                         className="animate-pulse opacity-90"
                       />
                     )}
-                    {isCovered && !isTarget && (
+                    {isYellow && !isTarget && (
+                      <circle 
+                        cx={px} 
+                        cy={py} 
+                        r={8.5} 
+                        fill="none"
+                        stroke="#eab308" 
+                        strokeWidth="1.2" 
+                        className="opacity-90 animate-pulse"
+                      />
+                    )}
+                    {isCovered && !isTarget && !isYellow && (
                       <circle 
                         cx={px} 
                         cy={py} 
@@ -268,6 +296,8 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
                       className={`transition-all duration-300 ${
                         isTarget
                           ? 'fill-amber-400 stroke-amber-200 stroke-[1px] drop-shadow-[0_0_6px_#f59e0b]'
+                          : isYellow
+                          ? 'fill-yellow-300 stroke-yellow-400 stroke-[1px] drop-shadow-[0_0_4px_#eab308]'
                           : isCovered
                           ? 'fill-emerald-100 stroke-emerald-400 stroke-[1px]'
                           : color === 'green' 
@@ -279,14 +309,16 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
                     />
 
                     {/* Pocket bead/ball inside the cell */}
-                    {(isTarget || isCovered) && (
+                    {(isTarget || isYellow || isCovered) && (
                       <circle 
                         cx={px} 
                         cy={py} 
-                        r={isTarget ? 2.5 : 1.8} 
+                        r={isTarget ? 2.5 : isYellow ? 2.0 : 1.8} 
                         className={`transition-all duration-300 ${
                           isTarget 
                             ? 'fill-white stroke-amber-100 stroke-[0.5px] drop-shadow-[0_0_4px_#ffffff]' 
+                            : isYellow
+                            ? 'fill-yellow-800 stroke-yellow-200 stroke-[0.5px]'
                             : 'fill-emerald-500'
                         }`}
                       />
@@ -301,6 +333,8 @@ export default function MiniCylinder({ activeTargets, coveredNumbers }: MiniCyli
                       className={`text-[7.5px] font-black font-mono transition-all duration-300 cursor-default select-none ${
                         isTarget 
                           ? 'fill-amber-500 font-black text-[9px] drop-shadow-[0_0_3px_rgba(245,158,11,0.6)]' 
+                          : isYellow
+                          ? 'fill-yellow-600 font-extrabold text-[8.5px]'
                           : isCovered 
                           ? 'fill-emerald-600 font-extrabold text-[8.5px]' 
                           : color === 'green'

@@ -32,6 +32,7 @@ import {
   User,
   Calendar,
   DollarSign,
+  Rocket,
 } from 'lucide-react';
 import AutoScanner from './components/AutoScanner';
 import MiniCylinder from './components/MiniCylinder';
@@ -39,7 +40,7 @@ import HistoryPanel, { HistoryEntry } from './components/HistoryPanel';
 import MetricsPanel from './components/MetricsPanel';
 import PatternDetector from './components/PatternDetector';
 import { getAutoPilotRecommendation, calculateHotColdStats, calculateTableStability } from './lib/patterns';
-import { getVibrationalComponents } from './lib/vibration';
+import { getVibrationalComponents, getVibrationalColorSynergy } from './lib/vibration';
 import {
   CYLINDER,
   getNeighbors,
@@ -49,6 +50,7 @@ import {
   COLORS,
   getNumberSector,
   SECTORS,
+  calcularNumerosAmarelos,
 } from './lib/roulette';
 
 let sharedAudioCtx: AudioContext | null = null;
@@ -108,7 +110,6 @@ export default function App() {
   }, [history]);
 
   const [manualTargets, setManualTargets] = useState<number[]>([]);
-  const [manualInputMode, setManualInputMode] = useState<'select_targets' | 'register_spin'>('select_targets');
   const [inputMode, setInputMode] = useState<'manual' | 'auto'>('manual');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [showHelpModal, setShowHelpModal] = useState<boolean>(false);
@@ -167,6 +168,34 @@ export default function App() {
   const [isSafetyWaiting, setIsSafetyWaiting] = useState<boolean>(false);
   const [safetyPendingTargets, setSafetyPendingTargets] = useState<number[]>([]);
   const [safetyPendingNeighborRange, setSafetyPendingNeighborRange] = useState<number>(2);
+
+  // Modo Análise Contínua (Acende Análise Toda Hora)
+  const [isContinuousAnalysis, setIsContinuousAnalysis] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('roulette_continuous_analysis') === 'true';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('roulette_continuous_analysis', String(isContinuousAnalysis));
+    }
+  }, [isContinuousAnalysis]);
+
+  // Modo Alavancagem (Fichas mais altas para subir banca rápido com poucos wins)
+  const [isLeverageMode, setIsLeverageMode] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('roulette_leverage_mode') === 'true';
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('roulette_leverage_mode', String(isLeverageMode));
+    }
+  }, [isLeverageMode]);
 
   // Estados para colar histórico em lote
   const [isPasteModalOpen, setIsPasteModalOpen] = useState<boolean>(false);
@@ -276,7 +305,7 @@ export default function App() {
     }
   }, [managementPlanMode]);
 
-  // Chip calculation based on bankroll and AI Risk Profile selection
+  // Chip calculation based on bankroll, AI Risk Profile selection, and Leverage Mode
   const currentChip = useMemo(() => {
     let percentage = 0.002; // moderate (0.2% per chip)
     let minChip = 1.0;
@@ -288,12 +317,18 @@ export default function App() {
       minChip = 2.0;
     }
     
+    // In Leverage Mode (Modo Alavancagem), scale up chip size (2.5x) for aggressive bankroll growth with fewer wins
+    if (isLeverageMode) {
+      percentage *= 2.5;
+      minChip = Math.max(minChip * 2.5, 2.5);
+    }
+
     const rawChip = currentBankroll * percentage;
     // Round to nearest 0.50
     const rounded = Math.round(rawChip * 2) / 2;
     // Ensure we don't go below the minimum chip size
     return Math.max(minChip, rounded);
-  }, [currentBankroll, aiRiskProfile]);
+  }, [currentBankroll, aiRiskProfile, isLeverageMode]);
 
   // Sound cue player using Web Audio API
   const playAudioCue = (type: 'success' | 'click' | 'alert') => {
@@ -354,7 +389,7 @@ export default function App() {
   // Calculate dynamic AI Auto-Pilot recommendation when active
   const aiRecommendation = useMemo(() => {
     try {
-      return getAutoPilotRecommendation(
+      const rec = getAutoPilotRecommendation(
         history,
         targetCount,
         neighborRange,
@@ -363,6 +398,18 @@ export default function App() {
         ballDirection,
         provider
       );
+
+      if (isContinuousAnalysis && history.length > 0) {
+        return {
+          ...rec,
+          isHoraDeJogar: true,
+          entrySignal: 'ENTRAR AGORA' as const,
+          entryReason: '⚡ MODO ANÁLISE CONTÍNUA: Análise acesa e acionada em 100% dos giros em tempo real sem esperar gatilhos passivos.',
+          strategyLabel: rec.strategyLabel?.includes('⚡') ? rec.strategyLabel : `⚡ ${rec.strategyLabel || 'FUSÃO IA'} (TODA HORA)`
+        };
+      }
+
+      return rec;
     } catch (err) {
       console.error("Critical error in aiRecommendation useMemo:", err);
       // Clean fallback matching structure
@@ -392,7 +439,7 @@ export default function App() {
         pullConvergence: null
       };
     }
-  }, [history, targetCount, neighborRange, engineFilterMode, dealerChangeRoundCount, ballDirection, provider]);
+  }, [history, targetCount, neighborRange, engineFilterMode, dealerChangeRoundCount, ballDirection, provider, isContinuousAnalysis]);
 
   // Calculate table stability index based on historic sequences
   const tableStability = useMemo(() => {
@@ -456,9 +503,27 @@ export default function App() {
     return false;
   }, [historyNumbers, aiRecommendation]);
 
+  // Evaluates if the active analysis is "muito forte" (very strong/high confidence).
+  // Standard signals do NOT use Gale: if G0 misses, numbers turn off (apagam) or update analysis (muda de análise).
+  // Exceptionally strong signals permit 1 Gale on that analysis.
+  const isVeryStrongAnalysis = useMemo(() => {
+    if (!aiRecommendation) return false;
+
+    const highCertainty = aiCertaintyScore >= 80;
+    const highWinProb = (aiRecommendation.winProbability || 0) >= 88;
+    const highPullConvergence = (aiRecommendation.pullConvergence?.certaintyScore || 0) >= 80;
+    const isSniperOrCritical = 
+      Boolean(aiRecommendation.strategyLabel?.includes('SNIPER')) || 
+      Boolean(aiRecommendation.strategyLabel?.includes('Atraso Crítico')) ||
+      aiRecommendation.triggerType === 'g1_only' ||
+      aiRecommendation.isSecondPayFilterActive;
+
+    return highCertainty || highWinProb || highPullConvergence || isTerminalTrend || isSniperOrCritical;
+  }, [aiRecommendation, aiCertaintyScore, isTerminalTrend]);
+
   // Play automatic high-alert sound cue and latch play signal when the "HORA DE JOGAR" trigger activates!
   useEffect(() => {
-    if (targetStrategy === 'ai' && aiRecommendation.isHoraDeJogar && !isGaleActive && !isPlaySignalActive && !isSafetyWaiting) {
+    if ((targetStrategy === 'ai' || targetStrategy === 'frequency') && aiRecommendation.isHoraDeJogar && !isGaleActive && !isPlaySignalActive && !isSafetyWaiting) {
       if (isSafetyMode) {
         // Under safety mode, do NOT light up now (G0). Instead, wait for a G0 miss to trigger directly on Gale 1.
         setIsSafetyWaiting(true);
@@ -500,195 +565,253 @@ export default function App() {
 
   // Generate recommended targets
   const activeTargets = useMemo(() => {
-    if (isGaleActive && galeTargets.length > 0) {
-      return galeTargets;
-    }
-    if (targetStrategy === 'ai' && isPlaySignalActive && frozenAiTargets.length > 0) {
-      return frozenAiTargets;
-    }
-    if (historyNumbers.length === 0) {
+    try {
+      if (isGaleActive && Array.isArray(galeTargets) && galeTargets.length > 0) {
+        return galeTargets;
+      }
+      if ((targetStrategy === 'ai' || targetStrategy === 'frequency') && isContinuousAnalysis) {
+        return (aiRecommendation && Array.isArray(aiRecommendation.targets)) ? aiRecommendation.targets : [];
+      }
+      if ((targetStrategy === 'ai' || targetStrategy === 'frequency') && isPlaySignalActive && Array.isArray(frozenAiTargets) && frozenAiTargets.length > 0) {
+        return frozenAiTargets;
+      }
+      if (!Array.isArray(historyNumbers) || historyNumbers.length === 0) {
+        return [];
+      }
+      if (targetStrategy === 'ai' || targetStrategy === 'frequency') {
+        return (aiRecommendation && Array.isArray(aiRecommendation.targets)) ? aiRecommendation.targets : [];
+      }
+      if (targetStrategy === 'manual') {
+        const safeManualTargets = Array.isArray(manualTargets) ? manualTargets : [];
+        if (safeManualTargets.length > 0) {
+          return safeManualTargets;
+        }
+        return suggestTargets(historyNumbers, targetCount, 'terminals') || [];
+      }
+      return suggestTargets(historyNumbers, targetCount, targetStrategy) || [];
+    } catch (err) {
+      console.error("Error calculating activeTargets:", err);
       return [];
     }
-    if (targetStrategy === 'ai') {
-      return aiRecommendation.targets;
-    }
-    if (targetStrategy === 'manual') {
-      if (manualTargets.length >= targetCount) {
-        return manualTargets.slice(0, targetCount);
-      }
-      const suggestions = suggestTargets(historyNumbers, targetCount, 'terminals');
-      const combined = [...manualTargets];
-      suggestions.forEach((num) => {
-        if (combined.length < targetCount && !combined.includes(num)) {
-          combined.push(num);
-        }
-      });
-      return combined;
-    }
-    return suggestTargets(historyNumbers, targetCount, targetStrategy);
-  }, [historyNumbers, targetCount, targetStrategy, manualTargets, aiRecommendation, isGaleActive, galeTargets, isPlaySignalActive, frozenAiTargets]);
+  }, [historyNumbers, targetCount, targetStrategy, manualTargets, aiRecommendation, isGaleActive, galeTargets, isPlaySignalActive, frozenAiTargets, isContinuousAnalysis]);
 
   // Neighbor range should adapt automatically if on AI Auto-Pilot
   const currentNeighborRange = useMemo(() => {
-    if (isGaleActive) {
-      return galeNeighborRange;
+    try {
+      if (isGaleActive) {
+        return galeNeighborRange;
+      }
+      if (targetStrategy === 'frequency') {
+        return 3; // Estritamente 3 vizinhos para cada lado em Números Quentes
+      }
+      if (targetStrategy === 'ai' && isPlaySignalActive) {
+        return frozenAiNeighborRange;
+      }
+      if (targetStrategy === 'ai') {
+        return aiRecommendation?.neighborRange ?? neighborRange;
+      }
+      return neighborRange;
+    } catch (err) {
+      console.error("Error in currentNeighborRange useMemo:", err);
+      return neighborRange;
     }
-    if (targetStrategy === 'ai' && isPlaySignalActive) {
-      return frozenAiNeighborRange;
-    }
-    if (targetStrategy === 'ai') {
-      return aiRecommendation.neighborRange;
-    }
-    return neighborRange;
   }, [targetStrategy, neighborRange, aiRecommendation, isGaleActive, galeNeighborRange, isPlaySignalActive, frozenAiNeighborRange]);
 
   // Coverage statistics
   const coverageStats = useMemo(() => {
-    return getStrategyCoverage(activeTargets, currentNeighborRange);
+    try {
+      return getStrategyCoverage(activeTargets, currentNeighborRange);
+    } catch (err) {
+      console.error("Error calculating coverageStats:", err);
+      return { coveredNumbers: [], percentage: 0 };
+    }
   }, [activeTargets, currentNeighborRange]);
+
+  // Yellow auxiliary target calculations (visual-only assistance)
+  const yellowNumbers = useMemo(() => {
+    try {
+      return calcularNumerosAmarelos(activeTargets);
+    } catch (err) {
+      console.error("Error calculating yellowNumbers:", err);
+      return [];
+    }
+  }, [activeTargets]);
 
   // Hot/Cold numbers statistics
   const hotColdStats = useMemo(() => {
     return calculateHotColdStats(historyNumbers);
   }, [historyNumbers]);
 
-  // Visual filter: only highlight targets & coverage if we are in manual mode OR have high confidence trigger active OR Gale is active OR dealer change is active
+  // Visual filter: highlight targets & coverage ONLY when signal active OR Gale active OR manual mode OR dealer change OR continuous mode is ON
   const shouldLightUp = useMemo(() => {
-    return targetStrategy === 'manual' || isPlaySignalActive || isGaleActive || (targetStrategy === 'ai' && dealerChangeRoundCount > 0);
-  }, [targetStrategy, isPlaySignalActive, isGaleActive, dealerChangeRoundCount]);
+    return isPlaySignalActive || isGaleActive || targetStrategy === 'manual' || dealerChangeRoundCount > 0 || (isContinuousAnalysis && historyNumbers.length > 0);
+  }, [isPlaySignalActive, isGaleActive, targetStrategy, dealerChangeRoundCount, isContinuousAnalysis, historyNumbers.length]);
 
   // Register a roll entry and evaluate WIN/LOSS instantly
   const handleNumberInput = (num: number) => {
-    playAudioCue('click');
+    try {
+      playAudioCue('click');
 
-    // If manual target selection is active, we toggled target configuration
-    if (targetStrategy === 'manual' && inputMode === 'manual' && manualInputMode === 'select_targets') {
-      setManualTargets((prev) => {
-        if (prev.includes(num)) {
-          return prev.filter((n) => n !== num);
-        } else {
-          const next = [...prev, num];
-          if (next.length > targetCount) {
-            return next.slice(next.length - targetCount);
-          }
-          return next;
-        }
-      });
-      return;
-    }
+      // Determine WIN/LOSS immediately based on the targets recommended BEFORE this roll
+      const currentTargets = Array.isArray(activeTargets) ? [...activeTargets] : [];
+      const currentCovered = (coverageStats && Array.isArray(coverageStats.coveredNumbers)) ? [...coverageStats.coveredNumbers] : [];
+      const isWin = currentCovered.includes(num);
+      const wasPlayed = !!shouldLightUp;
 
-    // Determine WIN/LOSS immediately based on the targets recommended BEFORE this roll
-    const currentTargets = [...activeTargets];
-    const currentCovered = [...coverageStats.coveredNumbers];
-    const isWin = currentCovered.includes(num);
-    const wasPlayed = shouldLightUp;
+      let playStatus: 'win' | 'loss' | 'g0-loss' | 'none' = 'none';
+      let balanceChange = 0;
 
-    let playStatus: 'win' | 'loss' | 'g0-loss' | 'none' = 'none';
-    let balanceChange = 0;
+      // Gale 1 State Transition
+      if (wasPlayed) {
+        const chipUsed = isGaleActive ? currentChip * 2 : currentChip;
+        const betAmount = currentCovered.length * chipUsed;
 
-    // Gale 1 State Transition
-    if (wasPlayed) {
-      const chipUsed = isGaleActive ? currentChip * 2 : currentChip;
-      const betAmount = currentCovered.length * chipUsed;
-
-      if (isWin) {
-        setIsGaleActive(false);
-        setGaleTargets([]);
-        setIsPlaySignalActive(false); // Win! Signal turns off (apaga)
-        playStatus = 'win';
-        balanceChange = (36 * chipUsed) - betAmount;
-        setTimeout(() => playAudioCue('success'), 100);
-      } else {
-        balanceChange = -betAmount;
-        if (!isGaleActive) {
-          // Enter Gale 1 (preserve current targets & neighbor range)
-          setIsGaleActive(true);
-          setGaleTargets(currentTargets);
-          setGaleNeighborRange(currentNeighborRange);
-          // isPlaySignalActive stays true to continue the signal for the Gale round
-          playStatus = 'g0-loss';
-        } else {
-          // Gale 1 failed - exit Gale and turn off signal (apaga)
+        if (isWin) {
           setIsGaleActive(false);
           setGaleTargets([]);
-          setIsPlaySignalActive(false);
-          playStatus = 'loss';
+          setIsPlaySignalActive(false); // Apaga o sinal após WIN para dar espaço pro app/IA analisar de novo
+          setFrozenAiTargets([]);
+          playStatus = 'win';
+          balanceChange = (36 * chipUsed) - betAmount;
+          setTimeout(() => playAudioCue('success'), 100);
+        } else {
+          balanceChange = -betAmount;
+          if (!isGaleActive) {
+            // Check if analysis is "muito forte" (very strong analysis)
+            if (isVeryStrongAnalysis) {
+              // Analysis is VERY STRONG: Give 1 Gale on this analysis
+              setIsGaleActive(true);
+              setGaleTargets(currentTargets);
+              setGaleNeighborRange(currentNeighborRange);
+              playStatus = 'g0-loss';
+            } else {
+              // Standard / regular analysis: NO GALE!
+              // Numbers turn off ("apagam") or update to new analysis on next spin ("muda de análise")
+              setIsGaleActive(false);
+              setGaleTargets([]);
+              setIsPlaySignalActive(false);
+              setFrozenAiTargets([]);
+              playStatus = 'loss';
+            }
+          } else {
+            // Gale 1 failed - exit Gale and turn off signal ("apaga")
+            setIsGaleActive(false);
+            setGaleTargets([]);
+            setIsPlaySignalActive(false);
+            setFrozenAiTargets([]);
+            playStatus = 'loss';
+          }
         }
-      }
-    } else {
-      // If we didn't play (was played is false), clean up any existing Gale state & signal
-      setIsGaleActive(false);
-      setGaleTargets([]);
-      setIsPlaySignalActive(false);
-      playStatus = 'none';
-    }
-
-    if (wasPlayed && balanceChange !== 0) {
-      setCurrentBankroll((prev) => Math.max(0, prev + balanceChange));
-    }
-
-    // Safety Mode Transition: If we were waiting for G0, check if we should now enter Gale 1
-    if (isSafetyWaiting && safetyPendingTargets.length > 0) {
-      const { coveredNumbers: safetyCovered } = getStrategyCoverage(safetyPendingTargets, safetyPendingNeighborRange);
-      const safetyHit = safetyCovered.includes(num);
-      
-      if (safetyHit) {
-        setIsSafetyWaiting(false);
-        setSafetyPendingTargets([]);
       } else {
-        // It missed! Trigger Gale 1 for the next spin
-        setIsPlaySignalActive(true);
-        setFrozenAiTargets(safetyPendingTargets);
-        setFrozenAiNeighborRange(safetyPendingNeighborRange);
-        setIsGaleActive(true);
-        setGaleTargets(safetyPendingTargets);
-        setGaleNeighborRange(safetyPendingNeighborRange);
+        // If we didn't play (was played is false), clean up any existing Gale state & signal
+        setIsGaleActive(false);
+        setGaleTargets([]);
+        setIsPlaySignalActive(false);
+        setFrozenAiTargets([]);
+        playStatus = 'none';
+      }
+
+      if (wasPlayed && balanceChange !== 0) {
+        setCurrentBankroll((prev) => Math.max(0, prev + balanceChange));
+      }
+
+      // Safety Mode Transition: If we were waiting for G0, check if we should now enter Gale 1
+      if (isSafetyWaiting && Array.isArray(safetyPendingTargets) && safetyPendingTargets.length > 0) {
+        const { coveredNumbers: safetyCovered } = getStrategyCoverage(safetyPendingTargets, safetyPendingNeighborRange);
+        const safetyHit = Array.isArray(safetyCovered) && safetyCovered.includes(num);
         
-        setIsSafetyWaiting(false);
-        setSafetyPendingTargets([]);
-        
-        if (soundEnabled) {
-          playAudioCue('alert');
-          setTimeout(() => playAudioCue('success'), 150);
+        if (safetyHit) {
+          setIsSafetyWaiting(false);
+          setSafetyPendingTargets([]);
+        } else {
+          // It missed! Trigger Gale 1 for the next spin
+          setIsPlaySignalActive(true);
+          setFrozenAiTargets(safetyPendingTargets);
+          setFrozenAiNeighborRange(safetyPendingNeighborRange);
+          setIsGaleActive(true);
+          setGaleTargets(safetyPendingTargets);
+          setGaleNeighborRange(safetyPendingNeighborRange);
+          
+          setIsSafetyWaiting(false);
+          setSafetyPendingTargets([]);
+          
+          if (soundEnabled) {
+            playAudioCue('alert');
+            setTimeout(() => playAudioCue('success'), 150);
+          }
         }
       }
+
+      const newEntry: HistoryEntry = {
+        id: Math.random().toString(36).substring(2, 9),
+        number: num,
+        isWin,
+        targets: currentTargets,
+        coveredNumbers: currentCovered,
+        strategyUsed: targetStrategy,
+        gameMode: gameMode,
+        timestamp: new Date().toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+        ballDirection,
+        wasPlayed,
+        playStatus,
+        balanceChange: wasPlayed ? balanceChange : 0,
+      };
+
+      if (dealerChangeRoundCount > 0) {
+        setDealerChangeRoundCount((prev) => Math.max(0, prev - 1));
+      }
+
+      setHistory((prev) => {
+        const safePrev = Array.isArray(prev) ? prev : [];
+        return [newEntry, ...safePrev].slice(0, 150);
+      });
+      
+      // Auto-alternate ball direction for the next spin (croupiers alternate CW / CCW)
+      setBallDirection((prev) => (prev === 'cw' ? 'ccw' : 'cw'));
+    } catch (err) {
+      console.error("Critical error in handleNumberInput:", err);
+      // Fallback clean insertion of the number with no targets to protect UI
+      const safeEntry: HistoryEntry = {
+        id: Math.random().toString(36).substring(2, 9),
+        number: num,
+        isWin: false,
+        targets: [],
+        coveredNumbers: [],
+        strategyUsed: targetStrategy,
+        gameMode: gameMode,
+        timestamp: new Date().toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+        ballDirection,
+        wasPlayed: false,
+        playStatus: 'none',
+        balanceChange: 0,
+      };
+      setHistory((prev) => {
+        const safePrev = Array.isArray(prev) ? prev : [];
+        return [safeEntry, ...safePrev].slice(0, 150);
+      });
     }
-
-    const newEntry: HistoryEntry = {
-      id: Math.random().toString(36).substring(2, 9),
-      number: num,
-      isWin,
-      targets: currentTargets,
-      coveredNumbers: currentCovered,
-      strategyUsed: targetStrategy,
-      gameMode: gameMode,
-      timestamp: new Date().toLocaleTimeString('pt-BR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-      }),
-      ballDirection,
-      wasPlayed,
-      playStatus,
-      balanceChange: wasPlayed ? balanceChange : 0,
-    };
-
-    if (dealerChangeRoundCount > 0) {
-      setDealerChangeRoundCount((prev) => Math.max(0, prev - 1));
-    }
-
-    setHistory((prev) => [newEntry, ...prev].slice(0, 150));
-    
-    // Auto-alternate ball direction for the next spin (croupiers alternate CW / CCW)
-    setBallDirection((prev) => (prev === 'cw' ? 'ccw' : 'cw'));
   };
 
-  const handleApplyCustomTargets = (targets: number[], range: number, strategy: typeof targetStrategy) => {
+  const handleApplyCustomTargets = (targets: number[], range: number, labelOrStrategy?: string) => {
     playAudioCue('success');
-    setTargetStrategy(strategy);
-    setManualTargets(targets);
-    setTargetCount(targets.length);
-    setNeighborRange(range);
+    if (labelOrStrategy === 'frequency' || (labelOrStrategy && labelOrStrategy.toLowerCase().includes('quente'))) {
+      setTargetStrategy('frequency');
+      setManualTargets([]);
+      setNeighborRange(3);
+    } else {
+      setTargetStrategy('manual');
+      setManualTargets(targets);
+      setNeighborRange(range);
+    }
+    setTargetCount(targets.length > 0 ? (targets.length as 3 | 4) : 3);
     setIsGaleActive(false);
     setGaleTargets([]);
     setIsPlaySignalActive(false);
@@ -704,6 +827,9 @@ export default function App() {
     setIsPlaySignalActive(false);
     setIsSafetyWaiting(false);
     setSafetyPendingTargets([]);
+    if (strat === 'frequency') {
+      setNeighborRange(3);
+    }
     if (strat !== 'manual') {
       setManualTargets([]);
     }
@@ -1076,6 +1202,24 @@ export default function App() {
               </div>
             </div>
 
+            {/* Botão de Análise Contínua / Acende Toda Hora */}
+            <button
+              onClick={() => {
+                setIsContinuousAnalysis(!isContinuousAnalysis);
+                setTimeout(() => playAudioCue('click'), 50);
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider ${
+                isContinuousAnalysis
+                  ? 'bg-purple-500/20 border-purple-400 text-purple-300 hover:bg-purple-500/30 shadow-sm animate-pulse'
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 hover:bg-zinc-800'
+              }`}
+              title={isContinuousAnalysis ? 'Análise Toda Hora: ATIVADA (Acende a análise em 100% das rodadas)' : 'Análise Toda Hora: DESATIVADA (Aguardando confirmações)'}
+            >
+              <Zap className={`w-3.5 h-3.5 ${isContinuousAnalysis ? 'fill-purple-400/20 text-purple-400' : ''}`} />
+              <span className="hidden sm:inline">Análise Toda Hora</span>
+              <span className="sm:hidden">Toda Hora</span>
+            </button>
+
             {/* Botão de Segurança */}
             <button
               onClick={() => {
@@ -1094,6 +1238,24 @@ export default function App() {
               <Shield className={`w-3.5 h-3.5 ${isSafetyMode ? 'fill-gold/10 text-gold' : ''}`} />
               <span className="hidden sm:inline">Botão de Segurança</span>
               <span className="sm:hidden">Segurança</span>
+            </button>
+
+            {/* Botão Modo Alavancagem */}
+            <button
+              onClick={() => {
+                setIsLeverageMode(!isLeverageMode);
+                setTimeout(() => playAudioCue('click'), 50);
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider ${
+                isLeverageMode
+                  ? 'bg-rose-500/20 border-rose-400 text-rose-300 hover:bg-rose-500/30 shadow-sm animate-pulse'
+                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-100 hover:border-zinc-700 hover:bg-zinc-800'
+              }`}
+              title={isLeverageMode ? 'Modo Alavancagem: ATIVADO (Fichas 2.5x mais altas para alavancar bancas rapidamente)' : 'Modo Alavancagem: DESATIVADO (Fichas padrão de gestão)'}
+            >
+              <Rocket className={`w-3.5 h-3.5 ${isLeverageMode ? 'text-rose-400 fill-rose-400/30' : ''}`} />
+              <span className="hidden sm:inline">Modo Alavancagem</span>
+              <span className="sm:hidden">Alavancagem</span>
             </button>
 
             {/* Sound toggle */}
@@ -1277,13 +1439,43 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+              ) : isContinuousAnalysis ? (
+                <div className="bg-zinc-900 border border-purple-500/30 rounded-xl p-3 flex items-center justify-between shadow-sm border-l-4 border-l-purple-500">
+                  <div className="flex items-center gap-2 text-left">
+                    <span className="w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping" />
+                    <div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-purple-300 font-black uppercase tracking-wider block">⚡ MODO ANÁLISE CONTÍNUA: ACESA TODA HORA!</span>
+                        <span className="text-[8px] bg-purple-500/20 text-purple-300 border border-purple-500/40 px-1.5 py-0.2 rounded font-black font-mono">
+                          🔄 ATUALIZANDO EM TEMPO REAL
+                        </span>
+                      </div>
+                      <span className="text-[8.5px] text-zinc-200 font-bold block mt-0.5">Alvos Ativos: {activeTargets.join(', ')} • Cobrir {coverageStats.percentage}% da mesa em cada giro.</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[7.5px] text-purple-400/70 block font-mono leading-none">Certeza</span>
+                    <span className="text-xs font-black text-purple-300 font-mono">{aiCertaintyScore}%</span>
+                  </div>
+                </div>
               ) : isPlaySignalActive ? (
                 <div className="bg-zinc-900 border border-gold/20 rounded-xl p-3 flex items-center justify-between shadow-sm border-l-4 border-l-gold">
                   <div className="flex items-center gap-2 text-left">
                     <span className="w-2.5 h-2.5 rounded-full bg-gold animate-ping" />
                     <div>
-                      <span className="text-[10px] text-gold font-black uppercase tracking-wider block">🔥 ENTRADA IA CONFIRMADA: JOGAR AGORA!</span>
-                      <span className="text-[8.5px] text-zinc-200 font-bold block">Alvos: {activeTargets.join(', ')} • Cobrir {coverageStats.percentage}% da mesa.</span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-gold font-black uppercase tracking-wider block">🔥 ENTRADA IA CONFIRMADA: JOGAR AGORA!</span>
+                        {isVeryStrongAnalysis ? (
+                          <span className="text-[8px] bg-amber-500/20 text-amber-400 border border-amber-500/40 px-1.5 py-0.2 rounded font-black font-mono">
+                            ⚡ ANÁLISE MUITO FORTE (Permite 1 Gale)
+                          </span>
+                        ) : (
+                          <span className="text-[8px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-1.5 py-0.2 rounded font-black font-mono">
+                            🎯 TIRO SECO (Sem Gale • Erro = Apaga/Muda)
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[8.5px] text-zinc-200 font-bold block mt-0.5">Alvos: {activeTargets.join(', ')} • Cobrir {coverageStats.percentage}% da mesa.</span>
                     </div>
                   </div>
                   <div className="text-right">
@@ -1408,7 +1600,11 @@ export default function App() {
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5 items-start">
               {/* Cylinder Column */}
               <div className="lg:col-span-5 flex flex-col items-center gap-3 w-full">
-                <MiniCylinder activeTargets={shouldLightUp ? activeTargets : []} coveredNumbers={shouldLightUp ? coverageStats.coveredNumbers : []} />
+                <MiniCylinder 
+                  activeTargets={shouldLightUp ? activeTargets : []} 
+                  coveredNumbers={shouldLightUp ? coverageStats.coveredNumbers : []} 
+                  yellowNumbers={shouldLightUp ? yellowNumbers : []} 
+                />
                 
                 {/* NOVO: Monitor de Estabilidade de Mesa e Certeza Analítica da IA */}
                 <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 w-full max-w-[340px] space-y-3 shadow-sm relative overflow-hidden">
@@ -1740,18 +1936,54 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* Control Button for Modo Alavancagem */}
+                      <div className={`p-2 rounded-lg border transition-all space-y-1 ${
+                        isLeverageMode 
+                          ? 'bg-rose-500/15 border-rose-500/40 shadow-sm' 
+                          : 'bg-zinc-950 border-zinc-800'
+                      }`}>
+                        <div className="flex items-center justify-between gap-1">
+                          <div className="flex items-center gap-1.5">
+                            <Rocket className={`w-3.5 h-3.5 ${isLeverageMode ? 'text-rose-400 animate-bounce' : 'text-zinc-500'}`} />
+                            <div className="text-left">
+                              <span className={`text-[8.5px] font-black uppercase tracking-wider block ${isLeverageMode ? 'text-rose-300' : 'text-zinc-300'}`}>
+                                Modo Alavancagem
+                              </span>
+                              <span className="text-[7px] text-zinc-400 leading-tight block">
+                                Fichas elevadas para alavancar bancas rapidamente com poucos wins.
+                              </span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setIsLeverageMode(!isLeverageMode);
+                              playAudioCue('click');
+                            }}
+                            className={`px-2 py-1 rounded text-[8px] font-black uppercase tracking-wider transition-all cursor-pointer border shrink-0 ${
+                              isLeverageMode
+                                ? 'bg-rose-500 text-black border-rose-400 font-black shadow-sm animate-pulse'
+                                : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border-zinc-700'
+                            }`}
+                          >
+                            {isLeverageMode ? '🚀 Ativado' : 'Desativado'}
+                          </button>
+                        </div>
+                      </div>
+
                       {/* Ficha Dinâmica baseada na banca */}
                       <div className="bg-zinc-900 p-2 rounded border border-zinc-800 space-y-1.5 shadow-sm">
                         <div className="flex items-center justify-between">
                           <div className="text-left">
                             <div className="text-[8.5px] font-extrabold uppercase text-zinc-300 flex items-center gap-1">
                               Ficha Dimensionada por IA
-                              <span className="text-[7px] text-gold lowercase font-mono">
-                                ({aiRiskProfile === 'conservative' ? '0.1%' : aiRiskProfile === 'moderate' ? '0.2%' : '0.4%'} da banca)
+                              <span className={`text-[7px] lowercase font-mono ${isLeverageMode ? 'text-rose-400 font-bold' : 'text-gold'}`}>
+                                ({isLeverageMode ? '🚀 Alavancagem 2.5x' : `${aiRiskProfile === 'conservative' ? '0.1%' : aiRiskProfile === 'moderate' ? '0.2%' : '0.4%'} da banca`})
                               </span>
                             </div>
                             <div className="text-[7px] text-zinc-500 leading-tight max-w-[150px]">
-                              {aiRiskProfile === 'conservative' 
+                              {isLeverageMode
+                                ? '🚀 Fichas mais altas ativas para alavancagem rápida com poucos wins.'
+                                : aiRiskProfile === 'conservative' 
                                 ? 'Foco absoluto em segurança de banca com rebaixamento mínimo.' 
                                 : aiRiskProfile === 'moderate' 
                                 ? 'Equilíbrio inteligente para obter crescimento estável.' 
@@ -1759,7 +1991,7 @@ export default function App() {
                             </div>
                           </div>
                           <div className="text-right">
-                            <span className="font-mono font-black text-[13px] text-gold">
+                            <span className={`font-mono font-black text-[13px] ${isLeverageMode ? 'text-rose-400' : 'text-gold'}`}>
                               R$ {currentChip.toFixed(2)}
                             </span>
                             {isGaleActive && (
@@ -1772,19 +2004,48 @@ export default function App() {
                         
                         {/* IA Explanation of Best Betting Strategy */}
                         <div className="bg-zinc-950 p-1.5 rounded border border-zinc-800 text-[7.5px] text-zinc-400 leading-relaxed font-mono">
-                          🧠 <span className="text-zinc-300 font-bold">Justificativa da IA:</span> Com banca de R$ {currentBankroll.toFixed(2)}, a ficha de R$ {currentChip.toFixed(2)} protege seu capital contra até {aiRiskProfile === 'conservative' ? '65' : aiRiskProfile === 'moderate' ? '35' : '15'} rodadas negativas consecutivas. {currentBankroll < 300 && "⚠️ Recomendado banca de R$ 300+ para melhor gestão!"}
+                          🧠 <span className="text-zinc-300 font-bold">Justificativa da IA:</span> {
+                            isLeverageMode 
+                              ? `🚀 MODO ALAVANCAGEM ATIVO: Com a banca de R$ ${currentBankroll.toFixed(2)}, a ficha foi elevada para R$ ${currentChip.toFixed(2)} permitindo subir o saldo rapidamente com poucos acertos em sequência!`
+                              : `Com banca de R$ ${currentBankroll.toFixed(2)}, a ficha de R$ ${currentChip.toFixed(2)} protege seu capital contra até ${aiRiskProfile === 'conservative' ? '65' : aiRiskProfile === 'moderate' ? '35' : '15'} rodadas negativas consecutivas. ${currentBankroll < 300 ? "⚠️ Recomendado banca de R$ 300+ para melhor gestão!" : ""}`
+                          }
                         </div>
                       </div>
                     </div>
-                    <div className="space-y-1.5 pt-1">
+                    <div className="space-y-2 pt-1">
                       <div className="flex items-center justify-between">
-                        <span className="text-[8px] text-zinc-500 uppercase tracking-widest font-black block">
-                          Estratégia de Cobertura (Modo Operacional):
+                        <span className="text-[8px] text-zinc-400 uppercase tracking-widest font-black flex items-center gap-1">
+                          <Target className="w-3 h-3 text-gold" />
+                          Estratégia de Cobertura da Situação:
                         </span>
                         <span className="text-[8px] text-gold font-mono font-bold">
                           Cobertura: {coverageStats?.percentage}% ({coverageStats?.coveredNumbers?.length || 0}/37 Números)
                         </span>
                       </div>
+
+                      {/* Decisão Automática Atual da IA */}
+                      <div className="bg-gradient-to-r from-zinc-950 via-zinc-900 to-zinc-950 p-2 rounded-xl border border-gold/30 shadow-sm text-left">
+                        <div className="flex items-center justify-between gap-1 mb-1">
+                          <span className="text-[8.5px] font-black uppercase text-gold flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-gold animate-pulse" />
+                            Decisão Automática do App (Baseada na Mesa):
+                          </span>
+                          <span className={`text-[8px] px-2 py-0.5 rounded font-black uppercase font-mono border ${
+                            aiRecommendation?.targetSelectionMode?.includes('Cerco Amplo')
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_8px_rgba(245,158,11,0.2)]'
+                              : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-[0_0_8px_rgba(16,185,129,0.2)]'
+                          }`}>
+                            {aiRecommendation?.targetSelectionMode || '🎯 Tiro Concentrado (Alta Precisão)'}
+                          </span>
+                        </div>
+                        <p className="text-[8px] text-zinc-300 font-medium leading-relaxed">
+                          {aiRecommendation?.targetSelectionMode?.includes('Cerco Amplo')
+                            ? '🛡️ SITUAÇÃO DE CERCO AMPLO DETECTADA: A roleta apresenta oscilação, troca de crupiê recente ou pontos de atração dispersos em múltiplos setores. O app expandiu a cobertura para proteger sua banca.'
+                            : '🎯 SITUAÇÃO DE TIRO CONCENTRADO DETECTADA: A roleta apresenta alta estabilidade e convergência balística cirúrgica (pivot unificado). O app concentrou os alvos para máximo retorno por ficha.'}
+                        </p>
+                      </div>
+
+                      {/* Botoes de ajuste manual de alvos/vizinhos */}
                       <div className="grid grid-cols-2 gap-1.5 bg-zinc-950 p-1 rounded-xl border border-zinc-800">
                         <button
                           onClick={() => {
@@ -1799,7 +2060,7 @@ export default function App() {
                           }`}
                         >
                           <span className="text-[9.5px] font-black leading-tight">🎯 TIRO CONCENTRADO</span>
-                          <span className="text-[7.5px] opacity-80 mt-0.5 font-mono">1 Alvo • 9 Vizinhos (19 Números)</span>
+                          <span className="text-[7.5px] opacity-80 mt-0.5 font-mono">Fixar 1 Alvo • 9 Vizinhos</span>
                         </button>
                         <button
                           onClick={() => {
@@ -1814,24 +2075,24 @@ export default function App() {
                           }`}
                         >
                           <span className="text-[9.5px] font-black leading-tight">🦅 CERCO AMPLO</span>
-                          <span className="text-[7.5px] opacity-80 mt-0.5 font-mono">3 Alvos • 3 Vizinhos (21 Números)</span>
+                          <span className="text-[7.5px] opacity-80 mt-0.5 font-mono">Fixar 3 Alvos • 3 Vizinhos</span>
                         </button>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* NOVO: Sinergia Vibracional de Dígitos 1-9 (Último Giro) */}
-                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 w-full max-w-[340px] space-y-2.5 shadow-sm relative overflow-hidden">
+                {/* Sinergia Vibracional de Dígitos e Cores */}
+                <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-3 w-full max-w-[340px] space-y-2 shadow-sm relative overflow-hidden">
                   <div className="absolute inset-0 bg-gradient-to-br from-purple-500/5 via-transparent to-transparent pointer-events-none" />
                   
                   <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
                     <span className="text-[9px] text-zinc-400 uppercase tracking-widest font-black flex items-center gap-1.5">
                       <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                      Sinergia Vibracional de Dígitos
+                      Sinergia Vibracional (Dígitos & Cores)
                     </span>
                     <span className="text-[7.5px] bg-purple-500/10 border border-purple-500/30 text-purple-300 px-1.5 py-0.2 rounded font-black font-mono uppercase">
-                      REDUÇÃO 1-9
+                      VERMELHO • PRETO • ZERO
                     </span>
                   </div>
 
@@ -1839,6 +2100,7 @@ export default function App() {
                     (() => {
                       const lastVal = history[0].number;
                       const vibe = getVibrationalComponents(lastVal);
+                      const colorSynergy = getVibrationalColorSynergy(historyNumbers);
                       const isRed = COLORS[lastVal] === 'red';
                       const isBlack = COLORS[lastVal] === 'black';
                       const colorBg = isRed ? 'bg-red-600' : isBlack ? 'bg-slate-800' : 'bg-emerald-600';
@@ -1850,7 +2112,7 @@ export default function App() {
                               {vibe.original}
                             </span>
                             <div className="text-left flex-1">
-                              <span className="text-[7.5px] text-zinc-500 font-extrabold uppercase block leading-none">Número Base</span>
+                              <span className="text-[7.5px] text-zinc-500 font-extrabold uppercase block leading-none">Pedra {vibe.colorName}</span>
                               <span className="text-[10px] font-black text-zinc-300 block mt-0.5">
                                 Dígitos: <span className="text-purple-400 font-mono">{vibe.digits.join(' e ')}</span>
                                 {vibe.digits.length > 1 && <> • Soma: <span className="text-purple-400 font-mono">{vibe.sum}</span></>}
@@ -1858,26 +2120,107 @@ export default function App() {
                             </div>
                           </div>
 
+                          {/* Ponte de Mesma Cor */}
                           <div className="bg-zinc-950 p-2 rounded border border-zinc-850 flex items-center justify-between gap-1.5">
-                            <span className="text-[8px] text-zinc-500 font-black uppercase shrink-0">Vibrações Ativas:</span>
+                            <span className="text-[8px] text-zinc-500 font-black uppercase shrink-0">Ponte Mesma Cor:</span>
                             <div className="flex gap-1 flex-wrap">
-                              {vibe.allVibrations.map((v) => (
-                                <span key={`live-vibe-${v}`} className="px-1.5 py-0.5 bg-purple-500/10 text-purple-300 border border-purple-500/20 rounded font-mono font-black text-[9px]">
-                                  {v}
+                              {vibe.colorResonanceTargets.map((num) => (
+                                <span key={`live-color-vibe-${num}`} className={`px-1.5 py-0.5 font-mono font-black text-[9px] rounded text-white ${COLORS[num] === 'red' ? 'bg-red-600' : COLORS[num] === 'black' ? 'bg-slate-800' : 'bg-emerald-600'}`}>
+                                  {num}
                                 </span>
                               ))}
                             </div>
                           </div>
 
-                          <p className="text-[7.5px] text-zinc-500 font-mono leading-relaxed">
-                            💡 O número <span className="text-zinc-300 font-bold">{lastVal}</span> vibra na junção dos algarismos {vibe.allVibrations.join(', ')}. Isso ativa a atração harmônica com terminais correspondentes nas próximas rodadas.
-                          </p>
+                          <div className="p-1.5 bg-purple-950/40 border border-purple-800/30 rounded text-[7.5px] text-purple-200 font-mono leading-relaxed text-left">
+                            {colorSynergy.synergyReasoning}
+                          </div>
                         </div>
                       );
                     })()
                   ) : (
                     <div className="text-center py-4 text-[8px] text-zinc-500 italic">
-                      Aguardando primeiro giro para mapear a assinatura de vibração de dígitos...
+                      Aguardando primeiro giro para mapear a assinatura de vibração de dígitos e cores...
+                    </div>
+                  )}
+                </div>
+
+                {/* NOVO: Análise de Números Quentes (Ranking Rápido & Ação) */}
+                <div className="bg-zinc-900 border border-amber-500/30 rounded-xl p-3 w-full max-w-[340px] space-y-2 shadow-sm relative overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-zinc-800 pb-1.5">
+                    <span className="text-[9px] text-amber-400 uppercase tracking-widest font-black flex items-center gap-1.5">
+                      <Flame className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                      Análise de Números Quentes
+                    </span>
+                    <span className="text-[7.5px] bg-amber-500/10 border border-amber-500/30 text-amber-300 px-1.5 py-0.2 rounded font-black font-mono uppercase">
+                      TOP REPETIÇÃO
+                    </span>
+                  </div>
+
+                  {hotColdStats.hotNumbers.length > 0 ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {hotColdStats.hotNumbers.slice(0, 4).map((item, idx) => {
+                          const isRed = item.color === 'red';
+                          const isBlack = item.color === 'black';
+                          const colorBg = isRed ? 'bg-red-600' : isBlack ? 'bg-slate-800' : 'bg-emerald-600';
+
+                          return (
+                            <div key={`app-hot-${item.number}`} className="bg-zinc-950 border border-amber-500/20 p-1.5 rounded flex flex-col items-center justify-center text-center">
+                              <span className={`w-5 h-5 rounded-full flex items-center justify-center font-mono font-black text-white text-[10px] shadow-sm ${colorBg}`}>
+                                {item.number}
+                              </span>
+                              <span className="text-[8px] text-amber-400 font-mono font-black mt-1">
+                                {item.frequency}x
+                              </span>
+                              <span className="text-[7px] text-zinc-500 font-mono">
+                                {item.delay}g atr.
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {(() => {
+                        const hotNums = hotColdStats.hotNumbers.slice(0, 3).map(h => h.number);
+                        const isHotActive = targetStrategy === 'frequency';
+
+                        return (
+                          <div className="space-y-1.5">
+                            <button
+                              onClick={() => {
+                                if (isHotActive) {
+                                  handleSetStrategy('ai');
+                                } else {
+                                  handleSetStrategy('frequency');
+                                }
+                              }}
+                              className={`w-full p-1.5 rounded font-black text-[8.5px] uppercase tracking-wider flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer border ${
+                                isHotActive
+                                  ? 'bg-amber-500/25 border-amber-400 text-amber-200 shadow-sm animate-pulse'
+                                  : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/40'
+                              }`}
+                            >
+                              <Target className="w-3 h-3 text-amber-400" />
+                              {isHotActive 
+                                ? `✓ Pedras Quentes Dinâmicas Ativas (#${hotNums.join(', #')}) — Atualiza a Cada Giro (Toque p/ Desativar)`
+                                : `🎯 Usar Pedras Quentes como Alvos Dinâmicos (${hotNums.map(n => `#${n}`).join(', ')})`}
+                            </button>
+                            {targetStrategy !== 'ai' && (
+                              <button
+                                onClick={() => handleSetStrategy('ai')}
+                                className="w-full bg-zinc-950 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 border border-zinc-800 p-1 rounded font-bold text-[8px] uppercase tracking-wider flex items-center justify-center gap-1 transition-all cursor-pointer"
+                              >
+                                🔄 Voltar para Análise IA Automática
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div className="text-center py-3 text-[8px] text-zinc-500 italic">
+                      Nenhum número atingiu frequência alta recente na sessão.
                     </div>
                   )}
                 </div>
@@ -1929,20 +2272,14 @@ export default function App() {
                               </span>
                             </>
                           ) : (
-                            <span>{targetStrategy === 'manual' ? 'Quadrante de Jogadas & Seleção Manual' : 'Quadrante de Jogadas (Aguardando Sinal)'}</span>
+                            <span>Quadrante de Jogadas</span>
                           )}
                         </h3>
                         <p className="text-[9px] text-zinc-400 leading-relaxed mt-1">
                           {shouldLightUp ? (
-                            targetStrategy === 'manual' && manualInputMode === 'select_targets' ? (
-                              <>
-                                <span className="text-gold font-bold">Modo Seleção Ativo:</span> Toque nos números no quadrante abaixo para definir os seus alvos manuais de entrada.
-                              </>
-                            ) : (
-                              <>
-                                O mapa abaixo mostra onde jogar. <span className="text-gold font-bold">Chips Amarelos</span> são alvos, <span className="text-emerald-500 font-bold">Bordas Verdes</span> são vizinhos. Toque no número sorteado para registrar!
-                              </>
-                            )
+                            <>
+                              O mapa abaixo mostra onde jogar. <span className="text-gold font-bold">Chips Dourados</span> são alvos primários, <span className="text-yellow-400 font-bold">⚠️ Chips Amarelos</span> representam a sinergia de órbita/lacunas, e <span className="text-emerald-500 font-bold">Bordas Verdes</span> são vizinhos gerais. Toque no número sorteado para registrar!
+                            </>
                           ) : (
                             <span className="text-zinc-500 font-medium">
                               ⚠️ Análise em andamento. Os alvos e vizinhos acenderão no quadrante assim que o sinal <span className="text-gold font-black animate-pulse">⚡ ENTRAR AGORA</span> for ativado.
@@ -1950,33 +2287,6 @@ export default function App() {
                           )}
                         </p>
                       </div>
- 
-                      {targetStrategy === 'manual' && inputMode === 'manual' && (
-                        <div className="flex bg-zinc-950 p-0.5 rounded-lg border border-zinc-800 shrink-0 self-start">
-                          <button
-                            onClick={() => setManualInputMode('select_targets')}
-                            className={`px-2 py-1 rounded text-[9px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                              manualInputMode === 'select_targets'
-                                ? 'bg-gold text-black shadow-sm font-black'
-                                : 'text-zinc-500 hover:text-zinc-200'
-                            }`}
-                          >
-                            <span className={`w-1 h-1 rounded-full ${manualInputMode === 'select_targets' ? 'bg-black' : 'bg-gold animate-pulse'}`}></span>
-                            Configurar Alvos
-                          </button>
-                          <button
-                            onClick={() => setManualInputMode('register_spin')}
-                            className={`px-2 py-1 rounded text-[9px] font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
-                              manualInputMode === 'register_spin'
-                                ? 'bg-gold text-black shadow-sm font-black'
-                                : 'text-zinc-500 hover:text-zinc-200'
-                            }`}
-                          >
-                            <span className={`w-1 h-1 rounded-full ${manualInputMode === 'register_spin' ? 'bg-black' : 'bg-gold animate-pulse'}`}></span>
-                            Registrar Giro
-                          </button>
-                        </div>
-                      )}
                     </div>
 
                     {/* 1-36 Numbers Grid - Layout Optimized for Clear Visualization */}
@@ -1986,6 +2296,7 @@ export default function App() {
                         const isZeroFrozen = hotColdStats.frozenNumbers.some(f => f.number === 0);
                         const isZeroCold = hotColdStats.coldNumbers.some(c => c.number === 0);
                         const isZeroTarget = activeTargets.includes(0) && shouldLightUp;
+                        const isZeroYellow = yellowNumbers.includes(0) && shouldLightUp;
                         const isZeroCovered = coverageStats.coveredNumbers.includes(0) && shouldLightUp;
                         return (
                           <button
@@ -1993,6 +2304,8 @@ export default function App() {
                             className={`w-full py-1.5 rounded-lg font-bold font-mono text-xs transition-all cursor-pointer active:scale-97 border ${
                               isZeroTarget
                                 ? 'bg-gradient-to-br from-gold-hover to-gold text-black border-gold ring-2 ring-gold shadow-sm font-black'
+                                : isZeroYellow
+                                ? 'bg-yellow-950/30 text-yellow-400 border-yellow-500/50 shadow-sm font-black'
                                 : isZeroCovered
                                 ? 'bg-emerald-950/20 text-emerald-400 border-emerald-900/40 font-black shadow-sm'
                                 : isZeroFrozen
@@ -2006,6 +2319,8 @@ export default function App() {
                               <span className="text-xs">0 (Verde)</span>
                               {isZeroTarget ? (
                                 <span className="text-[8px] bg-black text-gold px-1 py-0.2 rounded border border-gold/30 font-black">ALVO PRINCIPAL</span>
+                              ) : isZeroYellow ? (
+                                <span className="text-[8px] bg-yellow-500 text-black px-1 py-0.2 rounded font-black">⚠️ SINERGIA</span>
                               ) : isZeroCovered ? (
                                 <span className="text-[8px] bg-emerald-600 text-white px-1 py-0.2 rounded font-black">COBRIR</span>
                               ) : isZeroFrozen ? (
@@ -2023,6 +2338,7 @@ export default function App() {
                         {Array.from({ length: 36 }, (_, i) => i + 1).map((num) => {
                           const color = COLORS[num];
                           const isTarget = activeTargets.includes(num) && shouldLightUp;
+                          const isYellow = yellowNumbers.includes(num) && shouldLightUp;
                           const isCovered = coverageStats.coveredNumbers.includes(num) && shouldLightUp;
                           const isFrozen = hotColdStats.frozenNumbers.some((f) => f.number === num);
                           const isCold = hotColdStats.coldNumbers.some((c) => c.number === num);
@@ -2034,6 +2350,8 @@ export default function App() {
                               className={`h-8.5 rounded-md flex flex-col items-center justify-center font-mono relative transition-all cursor-pointer active:scale-90 border ${
                                 isTarget
                                   ? 'bg-gradient-to-br from-gold-hover to-gold text-black border-gold ring-1 ring-gold shadow-sm font-black'
+                                  : isYellow
+                                  ? 'bg-yellow-950/30 text-yellow-400 border-yellow-500/50 shadow-sm font-black'
                                   : isCovered
                                   ? 'bg-emerald-950/20 text-emerald-400 border-emerald-900/40 font-extrabold shadow-sm'
                                   : isFrozen
@@ -2046,8 +2364,8 @@ export default function App() {
                               }`}
                             >
                               <span className="text-xs font-bold leading-none">{num}</span>
-                              <span className={`text-[7px] mt-0.5 font-bold scale-90 ${isTarget ? 'text-zinc-900' : isCovered ? 'text-emerald-400' : isFrozen ? 'text-red-400' : isCold ? 'text-blue-400' : 'text-zinc-500'}`}>
-                                {isTarget ? '🎯 ALVO' : isCovered ? 'COB' : isFrozen ? '❄️ VETO' : isCold ? '🧊 FRIO' : `T${getTerminal(num)}`}
+                              <span className={`text-[7px] mt-0.5 font-bold scale-90 ${isTarget ? 'text-zinc-900' : isYellow ? 'text-yellow-400 font-extrabold' : isCovered ? 'text-emerald-400' : isFrozen ? 'text-red-400' : isCold ? 'text-blue-400' : 'text-zinc-500'}`}>
+                                {isTarget ? '🎯 ALVO' : isYellow ? '⚠️ AMAR' : isCovered ? 'COB' : isFrozen ? '❄️ VETO' : isCold ? '🧊 FRIO' : `T${getTerminal(num)}`}
                               </span>
                             </button>
                           );
@@ -2093,6 +2411,10 @@ export default function App() {
                       <div className="flex items-center gap-1">
                         <span className="w-2.5 h-2.5 rounded bg-gradient-to-br from-gold-hover to-gold border border-gold"></span>
                         <span className="text-zinc-400 font-bold">Alvo</span>
+                      </div>
+                      <div className="flex items-center gap-1" title="Números Amarelos: vizinhos de órbita e preenchimento de buracos (Gap Fill)">
+                        <span className="w-2.5 h-2.5 rounded bg-yellow-950/30 border border-yellow-500/50"></span>
+                        <span className="text-yellow-400 font-bold">⚠️ Amarelo (Sinergia)</span>
                       </div>
                       <div className="flex items-center gap-1">
                         <span className="w-2.5 h-2.5 rounded bg-emerald-950/20 border border-emerald-900/40"></span>

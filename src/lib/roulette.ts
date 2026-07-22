@@ -70,12 +70,22 @@ export interface StrategyCoverage {
 
 export function getStrategyCoverage(targets: number[], range: number): StrategyCoverage {
   const coveredSet = new Set<number>();
-  const isTerminal2Camouflage = targets.includes(20) && (targets.includes(2) || targets.includes(12) || targets.includes(22) || targets.includes(32));
+  if (!targets || !Array.isArray(targets)) {
+    return { coveredNumbers: [], percentage: 0 };
+  }
+  const validTargets = targets.filter((t) => typeof t === 'number' && !isNaN(t));
+  const isTerminal2Camouflage = validTargets.includes(20) && (validTargets.includes(2) || validTargets.includes(12) || validTargets.includes(22) || validTargets.includes(32));
   
-  targets.forEach((target) => {
+  validTargets.forEach((target) => {
     const currentRange = (target === 20 && isTerminal2Camouflage) ? 1 : range;
     const neighbors = getNeighbors(target, currentRange);
-    neighbors.forEach((n) => coveredSet.add(n));
+    if (Array.isArray(neighbors)) {
+      neighbors.forEach((n) => {
+        if (typeof n === 'number' && !isNaN(n)) {
+          coveredSet.add(n);
+        }
+      });
+    }
   });
   const coveredNumbers = Array.from(coveredSet).sort((a, b) => a - b);
   const percentage = Number(((coveredNumbers.length / 37) * 100).toFixed(1));
@@ -104,21 +114,44 @@ export function suggestTargets(
   }
 
   if (strategy === 'frequency') {
-    // Count frequencies of each number in history
-    const freqs: Record<number, number> = {};
+    // Count frequencies in recent history (last 30 spins) and overall history
+    const sample30 = history.slice(0, 30);
+    const freqs30: Record<number, number> = {};
+    const freqsAll: Record<number, number> = {};
+    const delays: Record<number, number> = {};
+
+    for (let i = 0; i <= 36; i++) {
+      const idx = history.indexOf(i);
+      delays[i] = idx === -1 ? 9999 : idx; // 0 = last spin, 1 = 1 spin ago, 9999 = never hit
+    }
+
+    sample30.forEach((num) => {
+      if (num >= 0 && num <= 36) {
+        freqs30[num] = (freqs30[num] || 0) + 1;
+      }
+    });
+
     history.forEach((num) => {
-      freqs[num] = (freqs[num] || 0) + 1;
+      if (num >= 0 && num <= 36) {
+        freqsAll[num] = (freqsAll[num] || 0) + 1;
+      }
     });
 
-    // Sort cylinder by frequency, then by most recent
-    const sorted = [...CYLINDER].sort((a, b) => {
-      const freqA = freqs[a] || 0;
-      const freqB = freqs[b] || 0;
-      if (freqB !== freqA) return freqB - freqA;
-      return history.indexOf(a) - history.indexOf(b);
+    const numbers = Array.from({ length: 37 }, (_, i) => i);
+    // Sort primarily by recent 30 spins frequency, secondarily by total frequency, thirdly by delay ascending
+    numbers.sort((a, b) => {
+      const f30A = freqs30[a] || 0;
+      const f30B = freqs30[b] || 0;
+      if (f30B !== f30A) return f30B - f30A;
+
+      const fAllA = freqsAll[a] || 0;
+      const fAllB = freqsAll[b] || 0;
+      if (fAllB !== fAllA) return fAllB - fAllA;
+
+      return delays[a] - delays[b];
     });
 
-    return sorted.slice(0, count);
+    return numbers.slice(0, count);
   }
 
   if (strategy === 'terminals') {
@@ -295,3 +328,56 @@ export function getColors(): Record<number, 'red' | 'black' | 'green'> {
 }
 
 export const COLORS = getColors();
+
+/**
+ * Calculates yellow numbers (vizinhos directos + preenchimento de buracos de vizinhos)
+ * based on main target numbers (alvos principais), to assist in visualizing the gaps/crossings.
+ */
+export function calcularNumerosAmarelos(alvosPrincipais: number[]): number[] {
+  if (!alvosPrincipais || !Array.isArray(alvosPrincipais)) return [];
+  
+  const todosIluminados = new Set<number>();
+  const amarelos = new Set<number>();
+
+  // Etapa 1: Marca o alvo e +1 vizinho de cada lado
+  alvosPrincipais.forEach(alvo => {
+    const index = CYLINDER.indexOf(alvo);
+    if (index === -1) return;
+    
+    let vizinhoEsquerda = CYLINDER[(index - 1 + 37) % 37];
+    let vizinhoDireita = CYLINDER[(index + 1) % 37];
+    
+    // Cadastra todos no set geral de iluminados
+    todosIluminados.add(alvo);
+    todosIluminados.add(vizinhoEsquerda);
+    todosIluminados.add(vizinhoDireita);
+
+    // Separa quem é apenas vizinho (amarelo)
+    amarelos.add(vizinhoEsquerda);
+    amarelos.add(vizinhoDireita);
+  });
+
+  // Etapa 2: Regra de preencher buracos (Gap fill / cruzamento)
+  for (let i = 0; i < CYLINDER.length; i++) {
+    const numAtual = CYLINDER[i];
+    
+    // Se o número atual está apagado...
+    if (!todosIluminados.has(numAtual)) {
+      const leftNum = CYLINDER[(i - 1 + 37) % 37];
+      const rightNum = CYLINDER[(i + 1) % 37];
+      
+      // ...Mas o da direita e da esquerda estão acesos, ele abraça o número do meio!
+      if (todosIluminados.has(leftNum) && todosIluminados.has(rightNum)) {
+        amarelos.add(numAtual);
+        todosIluminados.add(numAtual);
+      }
+    }
+  }
+
+  // Remove do conjunto amarelo qualquer número que seja o próprio alvo principal
+  alvosPrincipais.forEach(alvo => amarelos.delete(alvo));
+
+  // Retorna todos os números que vão acender em amarelo
+  return Array.from(amarelos).sort((a, b) => a - b);
+}
+

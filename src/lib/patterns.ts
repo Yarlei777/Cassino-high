@@ -418,6 +418,15 @@ export function calculateHotColdStats(history: number[]): HotColdStatsResult {
     }
   });
 
+  // Amostra das últimas 30 rodadas para análise de números quentes por regra do usuário
+  const last30Spins = history.slice(0, 30);
+  const counts30 = Array(37).fill(0);
+  last30Spins.forEach(num => {
+    if (num >= 0 && num <= 36) {
+      counts30[num]++;
+    }
+  });
+
   const stats: HotColdNumber[] = Array.from({ length: 37 }, (_, num) => {
     let delay = 0;
     for (let i = 0; i < history.length; i++) {
@@ -434,18 +443,26 @@ export function calculateHotColdStats(history: number[]): HotColdStatsResult {
     const freq = counts[num];
     const pct = totalSpins > 0 ? Math.round((freq / totalSpins) * 100) : 0;
     
+    // REGRA DO USUÁRIO: Número Quente = saiu >= 5 vezes OU o seu vizinho no cilindro saiu >= 5 vezes nas últimas 30 rodadas
+    const freq30 = counts30[num];
+    const neighbors = getNeighbors(num, 2);
+    const neighborHits30 = neighbors.reduce((sumVal, n) => sumVal + (counts30[n] || 0), 0);
+
     let status: 'hot' | 'normal' | 'cold' | 'frozen' = 'normal';
     
     // Thresholds:
-    // - Frozen: Absent for >= 70 spins (approx 2 full wheel cycles). Strong correlation with dealer's throwing mechanics.
-    // - Cold: Absent for >= 37 spins (approx 1 full cycle).
-    // - Hot: Hit at least 3 times and was drawn within the last 15 spins.
-    if (delay >= 70) {
+    // - Frozen: Absent for >= 70 spins (approx 2 full wheel cycles).
+    // - Cold: Absent for >= 37 spins (approx 1 full cycle) AND frequency < 3.
+    // - Hot: saiu >= 3 vezes no histórico OU saiu >= 5 vezes (ou vizinhos) nas últimas 30 rodadas
+    if (delay >= 70 && freq < 3) {
       status = 'frozen';
-    } else if (delay >= 37) {
+    } else if (delay >= 37 && freq < 3) {
       status = 'cold';
-    } else if (freq >= 3 && delay <= 15) {
-      status = 'hot';
+    } else {
+      const minHotHits = history.length >= 30 ? 5 : Math.max(2, Math.floor((history.length * 5) / 30));
+      if (freq >= 3 || freq30 >= minHotHits || neighborHits30 >= minHotHits || (freq >= 2 && delay <= 15)) {
+        status = 'hot';
+      }
     }
 
     const color = COLORS[num] || 'black';
@@ -461,9 +478,15 @@ export function calculateHotColdStats(history: number[]): HotColdStatsResult {
   });
 
   // Hot numbers: sorted by frequency descending, then delay ascending
-  const hotNumbers = stats
-    .filter((s) => s.status === 'hot')
+  let hotNumbers = stats
+    .filter((s) => s.status === 'hot' || s.frequency >= 3)
     .sort((a, b) => b.frequency - a.frequency || a.delay - b.delay);
+
+  if (hotNumbers.length === 0) {
+    hotNumbers = stats
+      .filter((s) => s.frequency > 0)
+      .sort((a, b) => b.frequency - a.frequency || a.delay - b.delay);
+  }
   
   // Cold numbers: sorted by delay descending
   const coldNumbers = stats
@@ -1000,6 +1023,22 @@ export function generateActiveTriggers(history: number[]): ActiveTrigger[] {
     });
   }
 
+  // 7B. Bate e Volta de Região (Oscilação entre Setores ou Rebote Físico) Active Trigger
+  if (simplePatterns.bateEVoltaRegiao.active) {
+    const br = simplePatterns.bateEVoltaRegiao;
+    list.push({
+      id: `active-bate-volta-regiao-${br.type}`,
+      title: `⚡ Bate e Volta de Região: ${br.description}`,
+      description: `Gatilho de atração por oscilação regional ativo (${br.sequence.join(' ➜ ')}). Projeção direta para a região ${br.recommendedSector}!`,
+      type: 'bate_e_volta',
+      severity: br.streak >= 3 ? 'high' : 'medium',
+      actionLabel: `Jogar Rebote de Região`,
+      recommendedTargets: br.targets.slice(0, 6),
+      neighborRange: 2,
+      reasoning: br.reasoning,
+    });
+  }
+
   // 8. Repetição de Região (Setor / Quadrante) Active Trigger
   if (simplePatterns.repeticaoRegiao.active) {
     list.push({
@@ -1012,6 +1051,22 @@ export function generateActiveTriggers(history: number[]): ActiveTrigger[] {
       recommendedTargets: simplePatterns.repeticaoRegiao.targets.slice(0, 5),
       neighborRange: 2,
       reasoning: `Viés físico temporário ou assinatura de crupiê detectada. Quando o cilindro entra em repetição de região, é estatisticamente melhor seguir a tendência de região do que tentar quebrar.`,
+    });
+  }
+
+  // 8A. Repetição de Terminal Active Trigger
+  if (simplePatterns.repeticaoTerminal.active) {
+    const rt = simplePatterns.repeticaoTerminal;
+    list.push({
+      id: `active-repeticao-terminal-${rt.terminal}`,
+      title: `🎯 Repetição de Terminal ${rt.terminal}`,
+      description: `O Terminal ${rt.terminal} repetiu ${rt.streak}x em rodadas recentes (${rt.sequence.join(' ➜ ')}).`,
+      type: 'terminal_delay',
+      severity: 'high',
+      actionLabel: `Cercar Terminal ${rt.terminal}`,
+      recommendedTargets: rt.targets.slice(0, 6),
+      neighborRange: 2,
+      reasoning: rt.reasoning,
     });
   }
 
@@ -1063,6 +1118,28 @@ export function generateActiveTriggers(history: number[]): ActiveTrigger[] {
       recommendedTargets: oppositeNumbers.slice(0, 5),
       neighborRange: 2,
       reasoning: `Uma sequência unilateral de ${simplePatterns.delays.colorStreakDelay} giros da mesma cor é estatisticamente insustentável. O gatilho de quebra para alternância (Bate e Volta) está ativo.`,
+    });
+  }
+
+  // 11. Gatilho de Números Quentes (Top 3 Mais Quentes)
+  const hotColdStats = calculateHotColdStats(history);
+  if (hotColdStats.hotNumbers.length >= 2 && history.length >= 5) {
+    const top3Hot = hotColdStats.hotNumbers.slice(0, 3).map(h => h.number);
+    const hotTargets = Array.from(new Set([
+      ...top3Hot,
+      ...top3Hot.flatMap(n => getNeighbors(n, 1))
+    ])).slice(0, 9);
+
+    list.push({
+      id: `active-hot-top3-${top3Hot.join('-')}`,
+      title: `🔥 Concentração nos ${top3Hot.length} Números Mais Quentes (${top3Hot.join(', ')})`,
+      description: `Análise automática de aquecimento: os números (${top3Hot.map(n => `#${n}`).join(', ')}) concentram alta frequência e atração no histórico recente da mesa.`,
+      type: 'sector_dominance',
+      severity: 'high',
+      actionLabel: `Cercar Top ${top3Hot.length} Quentes`,
+      recommendedTargets: hotTargets,
+      neighborRange: 2,
+      reasoning: `O sistema alinhou os números quentes a favor das análises preditivas. Os números [${top3Hot.join(', ')}] e suas vizinhanças diretas concentram as maiores saídas e atração balística. A tendência física favorece apostar a favor da reincidência quente!`,
     });
   }
 
@@ -1938,7 +2015,7 @@ export function getAutoPilotRecommendation(
   engineMetrics?: EnginePerformance[];
   entrySignal: 'ENTRAR AGORA' | 'AGUARDAR CONFIRMAÇÃO';
   entryReason: string;
-  targetSelectionMode: 'Concentrado' | 'Disperso (Mais Alvos)';
+  targetSelectionMode: string;
   isHoraDeJogar: boolean;
   prevStrongestTarget?: number | null;
   isSecondPayFilterActive: boolean;
@@ -2035,7 +2112,7 @@ function getAutoPilotRecommendationInternal(
   engineMetrics?: EnginePerformance[];
   entrySignal: 'ENTRAR AGORA' | 'AGUARDAR CONFIRMAÇÃO';
   entryReason: string;
-  targetSelectionMode: 'Concentrado' | 'Disperso (Mais Alvos)';
+  targetSelectionMode: string;
   isHoraDeJogar: boolean;
   prevStrongestTarget?: number | null;
   isSecondPayFilterActive: boolean;
@@ -2873,15 +2950,100 @@ function getAutoPilotRecommendationInternal(
     });
   });
 
+  // Boost scores for top hot numbers to favor them in automatic analysis & target selection
+  const hotStatsForScoring = calculateHotColdStats(history);
+  const top3HotForScoring = hotStatsForScoring.hotNumbers.slice(0, 3).map(h => h.number);
+  const top1Hot = hotStatsForScoring.hotNumbers[0];
+  const top2Hot = hotStatsForScoring.hotNumbers[1];
+
+  // Criteria for Hot Numbers "Análise de Números Quentes (Alta Certeza)":
+  // Turns on automatically when hot numbers are present and strong on the table:
+  // 1. Top hot number has hit 3 or more times (frequency >= 3)
+  // 2. OR top hot number has hit 2+ times recently (frequency >= 2 and delay <= 12)
+  // 3. OR two or more hot numbers have frequency >= 2
+  const isHotNumbersVeryStrong = Boolean(top1Hot) && (
+    (top1Hot.frequency >= 3) ||
+    (top1Hot.frequency >= 2 && top1Hot.delay <= 12) ||
+    (top1Hot.frequency >= 2 && Boolean(top2Hot) && top2Hot.frequency >= 2)
+  );
+
+  top3HotForScoring.forEach((hotNum, idx) => {
+    // Priority boost: +14.0 for #1, +10.0 for #2, +7.0 for #3 when hot numbers are very strong
+    const boostVal = isHotNumbersVeryStrong ? (14.0 - idx * 3.5) : (8.0 - idx * 2.0);
+    combinedScores[hotNum] += boostVal;
+    // Also boost immediate wheel neighbors of hot numbers (+4.0)
+    const hotNeighbors = getNeighbors(hotNum, 1);
+    hotNeighbors.forEach(hn => {
+      combinedScores[hn] += 4.0;
+    });
+  });
+
+  // Apply rotation penalty if previous round was a WIN (BATEU!), so the engine immediately shifts to new analysis targets
+  // EXCEPTION: Do not apply rotation penalty to hot numbers if hot numbers analysis is active, as hot numbers can hit in consecutive sequence!
+  if (historyEntries.length > 0) {
+    const lastEntry = historyEntries[0];
+    if (lastEntry && lastEntry.isWin) {
+      const recentHitTargets = lastEntry.targets || [];
+      recentHitTargets.forEach(hitTarget => {
+        if (!isHotNumbersVeryStrong || !top3HotForScoring.includes(hitTarget)) {
+          combinedScores[hitTarget] -= 15.0; // Penalty to force immediate target rotation after win
+        }
+      });
+    }
+  }
+
   // Sort candidates (excluding the last number to avoid direct repeat wager unless extremely hot)
   const sortedCandidates = Array.from({ length: 37 }, (_, i) => i)
     .filter(n => n !== lastNum)
     .sort((a, b) => combinedScores[b] - combinedScores[a]);
 
-  // Use the user's preferred target count and neighbor range
-  const dynamicTargetCount = targetCount;
-  const dynamicNeighborRange = neighborRange;
-  const targetSelectionMode = targetCount <= 3 ? 'Concentrado' : 'Disperso (Mais Alvos)';
+  // --- AVALIAÇÃO DINÂMICA DE SITUAÇÃO DA MESA (TIRO CONCENTRADO VS CERCO AMPLO) ---
+  // O app decide automaticamente a hora de usar Cerco Amplo ou Tiro Concentrado dependendo da situação da roleta:
+  const tableStability = calculateTableStability(history);
+
+  // Fatores para TIRO CONCENTRADO (Laser Precision):
+  // 1. Pivot de atração KP unificado (convergência limpa num único setor)
+  // 2. Alta estabilidade estatística da mesa (tableStability.score >= 65)
+  // 3. Padrão Sniper ativado com alta confiança (detectedPatternConfidence >= 90)
+  const isConcentratedSituation = 
+    (pullConvergence?.hasConvergence && !pullConvergence?.isSeparated) ||
+    (tableStability.score >= 65 && detectedPatternConfidence >= 88) ||
+    (isG1OnlyTriggerActive) ||
+    (terminalBaseAnalysis.activeTerminal > 0 && !pullConvergence?.isSeparated);
+
+  // Fatores para CERCO AMPLO (Proteção de Múltiplos Setores / Volatilidade):
+  // 1. Instabilidade/Oscilação da mesa (tableStability.score < 60)
+  // 2. Convergência KP separada (pontos atrativos opostos no cilindro)
+  // 3. Troca recente de crupiê em adaptação (dealerChangeRoundCount > 0)
+  // 4. Múltiplos desvios de atraso acumulados
+  const isCercoAmploSituation = 
+    !isConcentratedSituation ||
+    tableStability.score < 60 ||
+    Boolean(pullConvergence?.isSeparated) ||
+    dealerChangeRoundCount > 0 ||
+    delayedElements.filter(e => e.delay >= e.threshold + 15).length >= 2;
+
+  let autoCoverageMode: string = '🎯 Tiro Concentrado (Alta Precisão)';
+  let situationalReasonText = '';
+
+  if (isCercoAmploSituation && !isConcentratedSituation) {
+    autoCoverageMode = '🛡️ Cerco Amplo (Proteção de Setor)';
+    situationalReasonText = `🛡️ MODO CERCO AMPLO: A roleta está ${tableStability.score < 60 ? 'em fase de oscilação e volatilidade' : dealerChangeRoundCount > 0 ? 'em transição com novo crupiê' : pullConvergence?.isSeparated ? 'com atração dispersa em múltiplos setores' : 'com desvios estatísticos dispersos'}. O app expandiu a cobertura para proteger sua banca.`;
+  } else {
+    autoCoverageMode = '🎯 Tiro Concentrado (Alta Precisão)';
+    situationalReasonText = `🎯 MODO TIRO CONCENTRADO: A roleta apresenta ${pullConvergence?.hasConvergence ? `alta atração no pivot ${pullConvergence.pivot}` : 'boa estabilidade estatística com convergência limpa'}. O app concentrou os alvos cirurgicamente para máximo retorno por ficha.`;
+  }
+
+  // Determina alvos e vizinhos dinamicamente para o Piloto Automático:
+  const dynamicTargetCount = autoCoverageMode.includes('Cerco Amplo')
+    ? Math.max(3, targetCountInput)
+    : Math.min(2, targetCountInput);
+
+  const dynamicNeighborRange = autoCoverageMode.includes('Cerco Amplo')
+    ? Math.max(3, neighborRangeInput)
+    : Math.min(2, neighborRangeInput);
+
+  const targetSelectionMode = autoCoverageMode;
 
   // Select targets dynamically by ensuring we don't pick targets that are already within each other's coverage.
   // "Quando o alvo for por ex 3 26 que sao um do lado do outro o app busca o próximo alvo forte ja que ja esta na cobertura"
@@ -2917,14 +3079,18 @@ function getAutoPilotRecommendationInternal(
 
   // If we are in Gale 1, override targets, neighbor range, and selection mode!
   const baseTargets = isGale1Active ? galeTargets : generatedTargets;
-  const finalRange = isGale1Active ? galeRange : dynamicNeighborRange;
-  const finalSelectionMode = isGale1Active ? galeSelectionMode : targetSelectionMode;
+  let finalRange = isGale1Active ? galeRange : dynamicNeighborRange;
+  if (isHotNumbersVeryStrong && !isGale1Active) {
+    finalRange = 3; // Estritamente 3 vizinhos para cada lado na Análise de Números Quentes
+  }
+  const finalSelectionMode = isGale1Active ? galeSelectionMode : (isHotNumbersVeryStrong ? '🔥 Números Quentes (3 Vizinhos)' : targetSelectionMode);
 
-  // Se houver um alvo mais forte da rodada anterior, nós o mantemos aceso (REBOTE) na nova análise para proteção contra batida de retorno
+  // Se a rodada anterior foi PERDA (!lastEntry.isWin), mantemos o alvo mais forte da rodada anterior (REBOTE) para proteção contra batida de retorno.
+  // Se BATEU (isWin === true), limpamos o prevStrongest para forçar MUDANÇA IMEDIATA DE ANÁLISE!
   let prevStrongest: number | null = null;
   if (historyEntries.length > 0) {
     const lastEntry = historyEntries[0];
-    if (lastEntry.targets && lastEntry.targets.length > 0) {
+    if (lastEntry && !lastEntry.isWin && lastEntry.targets && lastEntry.targets.length > 0) {
       prevStrongest = lastEntry.targets[0];
     }
   }
@@ -2981,7 +3147,8 @@ function getAutoPilotRecommendationInternal(
   });
   const isOverdueTriggerActive = superOverdueElements.length > 0;
   const isPatternTriggerActive = detectedPatternConfidence >= 98;
-  const isHoraDeJogar = isGale1Active || isOverdueTriggerActive || isPatternTriggerActive;
+  const isHotNumbersTriggerActive = isHotNumbersVeryStrong;
+  const isHoraDeJogar = isGale1Active || isOverdueTriggerActive || isPatternTriggerActive || isHotNumbersTriggerActive;
   const entrySignal: 'ENTRAR AGORA' | 'AGUARDAR CONFIRMAÇÃO' = isHoraDeJogar ? 'ENTRAR AGORA' : 'AGUARDAR CONFIRMAÇÃO';
   let entryReason = '';
 
@@ -2989,6 +3156,8 @@ function getAutoPilotRecommendationInternal(
     entryReason = `⚡ HORA DE JOGAR: Gatilho de Segurança Ativado! O giro anterior quebrou a análise atual, gerando um desvio estatístico perfeito. Esta é a hora de maior confiança para entrada com alvos preservados.`;
   } else if (isPatternTriggerActive) {
     entryReason = `⚡ HORA DE JOGAR - PADRÃO SNIPER ATIVO: ${regionReasonText}`;
+  } else if (isHotNumbersTriggerActive) {
+    entryReason = `🔥 HORA DE JOGAR - ANÁLISE DE NÚMEROS QUENTES: Análise aberta automaticamente a favor dos ${top3HotForScoring.length} números mais quentes da mesa (${top3HotForScoring.join(', ')}) e seus vizinhos no cilindro!`;
   } else if (isOverdueTriggerActive) {
     entryReason = `⚡ HORA DE JOGAR - CORREÇÃO DE ATRASO: Há um forte desvio estatístico acumulado! Elementos muito atrasados na mesa: ${superOverdueElements.map(e => `${e.name} (${e.delay} rodadas)`).join(', ')}.`;
   } else {
@@ -3009,8 +3178,14 @@ function getAutoPilotRecommendationInternal(
     ? `• Correção de Atrasos: ${delayedElements.map(e => `${e.name} atrasado há ${e.delay} rodadas`).join(', ')}.`
     : `• Padrões de Atraso: Todos os setores e terminais operando dentro de desvios normais.`;
 
+  const hotNumbersReasonText = top3HotForScoring.length > 0
+    ? `• Números Quentes Usados na Análise: [${top3HotForScoring.join(', ')}] (Impulso automático de probabilidade aplicado nos alvos quentes e vizinhos).`
+    : `• Números Quentes: Aguardando maior amostragem.`;
+
   const reasoning = `SISTEMA ANALÍTICO ADAPTATIVO (Markov + 12 Motores IA):
+• Decisão Estratégica da Situação: ${situationalReasonText}
 • Modo de Cobertura: [${finalSelectionMode}] (${targets.length} alvos e ${finalRange} vizinhos para cada lado).
+${hotNumbersReasonText}
 • Alvo Forte Preservado: ${prevStrongest !== null ? `Número ${prevStrongest} (O alvo mais forte da rodada anterior é mantido ativo nesta rodada para proteção de jogada subsequente, sendo renovado a cada giro).` : 'Nenhum.'}
 • Rastreamento Dinâmico de Transições ("Quem Puxou"): O sistema vasculhou o histórico da mesa de roleta e identificou que toda vez que o terminal ${lastTerminal} ou o número ${lastNum} aparecem, eles possuem fortes chamadores ("predecessores") e atrações ("sucessores") estatísticas na sessão atual.
 • Motor Líder: O motor "${bestEngine.name}" registrou aproveitamento de ${bestEngine.rate}% nas simulações recentes e obteve o maior peso (x${bestEngine.weight}) de influência na calibragem dos novos alvos.
@@ -3022,6 +3197,8 @@ ${overdueReasonText}
     neighborRange: finalRange,
     strategyLabel: isGale1Active 
       ? '⚡ HORA DE JOGAR' 
+      : isHotNumbersTriggerActive
+      ? `🔥 TOP ${top3HotForScoring.length} QUENTES (${top3HotForScoring.join(', ')})`
       : isOverdueTriggerActive 
       ? '⚡ HORA DE JOGAR: Atraso Crítico' 
       : 'AUTO-PILOT: Fusão Multi-Motor IA',
@@ -3442,6 +3619,18 @@ export interface SimplePatternResult {
     recommendedPlay: string;
     targets: number[];
   };
+  bateEVoltaRegiao: {
+    active: boolean;
+    type: 'sector_pingpong' | 'physical_bounce' | 'none';
+    streak: number;
+    description: string;
+    sectorA: string;
+    sectorB: string;
+    sequence: string[];
+    recommendedSector: string;
+    targets: number[];
+    reasoning: string;
+  };
   repeticaoRegiao: {
     active: boolean;
     type: 'sector' | 'quadrant' | 'interruptor' | 'color_brother_swing' | 'none';
@@ -3450,6 +3639,15 @@ export interface SimplePatternResult {
     sectorKey: string;
     sectorName: string;
     targets: number[];
+  };
+  repeticaoTerminal: {
+    active: boolean;
+    terminal: number;
+    streak: number;
+    sequence: number[];
+    description: string;
+    targets: number[];
+    reasoning: string;
   };
   previsaoDobraRetorno: PrevisaoDobraRetorno;
   terminalBaseAnalysis: TerminalBaseAnalysis;
@@ -3465,7 +3663,28 @@ export interface SimplePatternResult {
 export function evaluateSimplePatterns(history: number[]): SimplePatternResult {
   const result: SimplePatternResult = {
     bateEVolta: { active: false, type: 'none', streak: 0, description: '', sequence: [], recommendedPlay: '', targets: [] },
+    bateEVoltaRegiao: {
+      active: false,
+      type: 'none',
+      streak: 0,
+      description: '',
+      sectorA: '',
+      sectorB: '',
+      sequence: [],
+      recommendedSector: '',
+      targets: [],
+      reasoning: ''
+    },
     repeticaoRegiao: { active: false, type: 'none', streak: 0, description: '', sectorKey: '', sectorName: '', targets: [] },
+    repeticaoTerminal: {
+      active: false,
+      terminal: -1,
+      streak: 0,
+      sequence: [],
+      description: '',
+      targets: [],
+      reasoning: ''
+    },
     previsaoDobraRetorno: {
       active: false,
       type: 'none',
@@ -3570,6 +3789,121 @@ export function evaluateSimplePatterns(history: number[]): SimplePatternResult {
     };
   }
 
+  const getCylinderDistanceLocal = (num1: number, num2: number): number => {
+    const idx1 = CYLINDER.indexOf(num1);
+    const idx2 = CYLINDER.indexOf(num2);
+    if (idx1 === -1 || idx2 === -1) return 999;
+    const dist = Math.abs(idx1 - idx2);
+    return Math.min(dist, CYLINDER.length - dist);
+  };
+
+  // --- 1B. BATE E VOLTA DE REGIÃO (REGION / SECTOR PING-PONG & BOUNCE) ---
+  if (history.length >= 3) {
+    const s0 = getNumberSector(history[0]);
+    const s1 = getNumberSector(history[1]);
+    const s2 = getNumberSector(history[2]);
+    
+    // Pattern A: Sector Ping-Pong (e.g. Voisins -> Tiers -> Voisins)
+    if (s0 !== s1 && s0 === s2) {
+      let streak = 2;
+      if (history.length >= 4 && getNumberSector(history[3]) === s1) {
+        streak = 3;
+        if (history.length >= 5 && getNumberSector(history[4]) === s0) {
+          streak = 4;
+        }
+      }
+      
+      const secAName = getSectorName(s0);
+      const secBName = getSectorName(s1);
+      const seq = history.slice(0, streak + 1).map(n => getSectorName(getNumberSector(n))).reverse();
+      const nextSectorNums = getSectorFromKey(s1);
+      const lastNeighbors = getNeighbors(history[0], 2);
+      const targets = Array.from(new Set([...nextSectorNums, ...lastNeighbors])).slice(0, 12);
+
+      result.bateEVoltaRegiao = {
+        active: true,
+        type: 'sector_pingpong',
+        streak,
+        description: `Bate e Volta de Região (${secAName} ⇄ ${secBName})`,
+        sectorA: secAName,
+        sectorB: secBName,
+        sequence: seq,
+        recommendedSector: secBName,
+        targets,
+        reasoning: `Oscilação regional ativa entre ${secAName} e ${secBName}. Tendência de descarregar a próxima bola na região de ${secBName}.`
+      };
+    } 
+    // Pattern B: Physical Cylinder Distance Bounce (Rebote Físico na mesma região: dist(n0, n2) <= 4 and dist(n0, n1) >= 7)
+    else {
+      const d0_2 = getCylinderDistanceLocal(history[0], history[2]);
+      const d0_1 = getCylinderDistanceLocal(history[0], history[1]);
+      if (d0_2 <= 4 && d0_1 >= 7) {
+        const secName = getSectorName(s0);
+        const seq = [`${history[2]}`, `${history[1]}`, `${history[0]}`];
+        const bounceNeighbors = getNeighbors(history[0], 3);
+        const sameTerminalNums = CYLINDER.filter(n => n % 10 === (history[0] % 10));
+        const targets = Array.from(new Set([...bounceNeighbors, ...sameTerminalNums])).slice(0, 10);
+
+        result.bateEVoltaRegiao = {
+          active: true,
+          type: 'physical_bounce',
+          streak: 2,
+          description: `Rebote Físico na Mesma Região (${secName})`,
+          sectorA: `Região ${history[0]}`,
+          sectorB: `Escape ${history[1]}`,
+          sequence: seq,
+          recommendedSector: `Região de ${history[0]}`,
+          targets,
+          reasoning: `A bola bateu no ponto ${history[2]}, escapou para o ponto ${history[1]} e voltou imediatamente para a mesma área física (${history[0]}). Padrão de atração regional em andamento.`
+        };
+      }
+    }
+  }
+
+  // --- 1C. REPETIÇÃO DE TERMINAL (TERMINAL DIGIT REPETITION) ---
+  if (history.length >= 2) {
+    const t0 = history[0] % 10;
+    const t1 = history[1] % 10;
+    let termActive = false;
+    let termDigit = -1;
+    let termStreak = 0;
+    let termSeq: number[] = [];
+
+    if (t0 === t1) {
+      termActive = true;
+      termDigit = t0;
+      termStreak = 2;
+      termSeq = [history[1], history[0]];
+      
+      if (history.length >= 3 && history[2] % 10 === t0) {
+        termStreak = 3;
+        termSeq = [history[2], history[1], history[0]];
+      }
+    } else if (history.length >= 3 && history[2] % 10 === t0) {
+      termActive = true;
+      termDigit = t0;
+      termStreak = 2;
+      termSeq = [history[2], history[1], history[0]];
+    }
+
+    if (termActive) {
+      const termNums = CYLINDER.filter(n => n % 10 === termDigit);
+      const termNeighbors: number[] = [];
+      termNums.forEach(n => termNeighbors.push(...getNeighbors(n, 1)));
+      const targets = Array.from(new Set([...termNums, ...termNeighbors])).slice(0, 12);
+
+      result.repeticaoTerminal = {
+        active: true,
+        terminal: termDigit,
+        streak: termStreak,
+        sequence: termSeq,
+        description: `Repetição do Terminal ${termDigit} (${termStreak}x em rodadas recentes)`,
+        targets,
+        reasoning: `O Terminal ${termDigit} está ativado com saída recente (${termSeq.join(' ➜ ')}). Recomenda-se cobrir todos os números com terminal ${termDigit} e suas vizinhanças imediatas.`
+      };
+    }
+  }
+
   // --- 2. REPETIÇÃO DE REGIÃO (REGION REPETITION) ---
   
   // A. Sector Repeat
@@ -3608,14 +3942,6 @@ export function evaluateSimplePatterns(history: number[]): SimplePatternResult {
       }
     }
   }
-
-  const getCylinderDistanceLocal = (num1: number, num2: number): number => {
-    const idx1 = CYLINDER.indexOf(num1);
-    const idx2 = CYLINDER.indexOf(num2);
-    if (idx1 === -1 || idx2 === -1) return 999;
-    const dist = Math.abs(idx1 - idx2);
-    return Math.min(dist, CYLINDER.length - dist);
-  };
 
   // Prioritizar as novas detecções de curto prazo para repetição de região ultra-fiel pedida pelo usuário:
   let customRegionPatternDetected = false;
