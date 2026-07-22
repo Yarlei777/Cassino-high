@@ -266,26 +266,31 @@ export default function App() {
 
   // Chip calculation based on bankroll, AI Risk Profile selection, and Leverage Mode
   const currentChip = useMemo(() => {
-    let percentage = 0.002; // moderate (0.2% per chip)
-    let minChip = 1.0;
+    // Dynamic chip sizing proportional to bankroll
+    let percentage = 0.01; // moderate: 1.0% da banca por ficha (ex: R$ 1,00 para R$ 100)
+    let minChip = 0.50;
     if (aiRiskProfile === 'conservative') {
-      percentage = 0.001; // 0.1% per chip
-      minChip = 0.5;
+      percentage = 0.005; // 0.5% da banca por ficha (ex: R$ 0,50 para R$ 100, R$ 1,00 para R$ 200)
+      minChip = 0.50;
     } else if (aiRiskProfile === 'aggressive') {
-      percentage = 0.004; // 0.4% per chip
-      minChip = 2.0;
+      percentage = 0.02; // 2.0% da banca por ficha (ex: R$ 2,00 para R$ 100, R$ 4,00 para R$ 200)
+      minChip = 1.00;
     }
     
-    // In Leverage Mode (Modo Alavancagem), scale up chip size (2.5x) for aggressive bankroll growth with fewer wins
+    // In Leverage Mode (Modo Alavancagem), scale up chip size (2x) for faster bankroll growth
     if (isLeverageMode) {
-      percentage *= 2.5;
-      minChip = Math.max(minChip * 2.5, 2.5);
+      percentage *= 2.0;
+      minChip = Math.max(minChip * 1.5, 1.00);
     }
 
     const rawChip = currentBankroll * percentage;
-    // Round to nearest 0.50
-    const rounded = Math.round(rawChip * 2) / 2;
-    // Ensure we don't go below the minimum chip size
+    let rounded = 0.50;
+    if (rawChip >= 1.0) {
+      rounded = Math.round(rawChip * 2) / 2; // rounds to nearest 0.50
+    } else {
+      rounded = Math.round(rawChip * 4) / 4; // rounds to nearest 0.25 for small chips
+    }
+    
     return Math.max(minChip, rounded);
   }, [currentBankroll, aiRiskProfile, isLeverageMode]);
 

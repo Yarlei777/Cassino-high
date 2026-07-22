@@ -1123,7 +1123,7 @@ export function generateActiveTriggers(history: number[]): ActiveTrigger[] {
 
   // 11. Gatilho de Números Quentes (Top 3 Mais Quentes)
   const hotColdStats = calculateHotColdStats(history);
-  if (hotColdStats.hotNumbers.length >= 2 && history.length >= 5) {
+  if (hotColdStats.hotNumbers.length >= 1 && history.length >= 3) {
     const top3Hot = hotColdStats.hotNumbers.slice(0, 3).map(h => h.number);
     const hotTargets = Array.from(new Set([
       ...top3Hot,
@@ -2023,17 +2023,6 @@ export function getAutoPilotRecommendation(
   pullConvergence?: PullConvergenceResult | null;
 } {
   try {
-    // Construct a cache key based on the parameters and history sequence (including spin direction)
-    const historyKey = historyEntries.map(e => {
-      if (!e) return '0_cw';
-      return `${e.number}_${e.ballDirection || 'cw'}`;
-    }).join(',');
-    const cacheKey = `${targetCountInput}_${neighborRangeInput}_${engineFilterMode}_${dealerChangeRoundCount}_${nextBallDirection || 'none'}_${provider}_${historyKey}`;
-
-    if (recommendationCache.has(cacheKey)) {
-      return recommendationCache.get(cacheKey);
-    }
-
     const baseRec = getAutoPilotRecommendationInternal(
       historyEntries,
       targetCountInput,
@@ -2049,12 +2038,6 @@ export function getAutoPilotRecommendation(
       targetCountInput,
       dealerChangeRoundCount
     );
-
-    // Keep cache size bounded to prevent any memory growth issues
-    if (recommendationCache.size > 2000) {
-      recommendationCache.clear();
-    }
-    recommendationCache.set(cacheKey, result);
 
     return result;
   } catch (err) {
@@ -2140,7 +2123,7 @@ function getAutoPilotRecommendationInternal(
   const neighborRange = neighborRangeInput;
   const history = historyEntries.map(e => e.number);
 
-  if (history.length < 50) {
+  if (history.length === 0) {
     const activeEngineIds = engineFilterMode === 'essential' 
       ? [2, 4, 5, 6, 9, 10, 13, 14] 
       : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14];
@@ -2160,35 +2143,17 @@ function getAutoPilotRecommendationInternal(
       };
     });
 
-    if (history.length === 0) {
-      if (dealerChangeRoundCount > 0) {
-        return {
-          targets: [21, 14, 26],
-          neighborRange: 3,
-          strategyLabel: '🔄 TROCA DE CRUPIÊ REGISTRADA',
-          reasoning: 'CRUPIÊ NOVO REGISTRADO:\n• Mudança de crupiê detectada!\n• Como seu histórico actual de giros está vazio, a calibração de recuperação de números frios está agendada.\n• Insira o primeiro número para disparar o motor físico imediatamente.',
-          winProbability: 50,
-          triggerType: 'default_ai',
-          engineMetrics: emptyMetrics,
-          entrySignal: 'AGUARDAR CONFIRMAÇÃO',
-          entryReason: 'Troca de crupiê agendada! Insira o primeiro número sorteado para recalcular as pedras frias e disparar o motor adaptativo.',
-          targetSelectionMode: 'Concentrado',
-          isHoraDeJogar: false,
-          isSecondPayFilterActive: false,
-          isGerminating: true,
-        };
-      }
-
+    if (dealerChangeRoundCount > 0) {
       return {
         targets: [21, 14, 26],
         neighborRange: 3,
-        strategyLabel: '🌱 FASE DE GERMINAÇÃO: 0/50',
-        reasoning: 'O Auto-Pilot está na Fase de Germinação. Para calibrar a inteligência analítica dos 14 motores de IA com máxima fidelidade estatística, a mesa precisa acumular no mínimo 50 números no histórico.\n\nInsira os números sorteados para iniciar a semeadura de dados retrospectivos e amadurecer os cálculos balísticos.',
-        winProbability: 10,
+        strategyLabel: '🔄 TROCA DE CRUPIÊ REGISTRADA',
+        reasoning: 'CRUPIÊ NOVO REGISTRADO:\n• Mudança de crupiê detectada!\n• Como seu histórico actual de giros está vazio, a calibração de recuperação de números frios está agendada.\n• Insira o primeiro número para disparar o motor físico imediatamente.',
+        winProbability: 50,
         triggerType: 'default_ai',
         engineMetrics: emptyMetrics,
         entrySignal: 'AGUARDAR CONFIRMAÇÃO',
-        entryReason: '🌱 GERMINAÇÃO ATIVA: Histórico vazio. Insira os números para calibrar os motores (0/50).',
+        entryReason: 'Troca de crupiê agendada! Insira o primeiro número sorteado para recalcular as pedras frias e disparar o motor adaptativo.',
         targetSelectionMode: 'Concentrado',
         isHoraDeJogar: false,
         isSecondPayFilterActive: false,
@@ -2196,17 +2161,16 @@ function getAutoPilotRecommendationInternal(
       };
     }
 
-    // history.length > 0 but < 50
     return {
-      targets: [],
-      neighborRange: neighborRangeInput,
-      strategyLabel: `🌱 FASE DE GERMINAÇÃO: ${history.length}/50`,
-      reasoning: `Fase de Germinação Ativa: o sistema necessita de no mínimo 50 números registrados no histórico para sincronizar os 14 motores de IA, calibrar os desvios balísticos e processar a cadeia de transição de Markov com precisão matemática.\n\nStatus da Amostragem: Coletados ${history.length} de 50 giros necessários. Faltam exatamente ${50 - history.length} números adicionados para habilitar as recomendações e liberar os sinais automáticos da IA.`,
-      winProbability: Math.round((history.length / 50) * 100),
+      targets: [21, 14, 26],
+      neighborRange: 3,
+      strategyLabel: '🌱 MESA AGUARDANDO GIROS (0/1)',
+      reasoning: 'O Auto-Pilot está pronto e calibrado. Insira os primeiros números sorteados na mesa para disparar os 14 motores de IA, a análise de números quentes e a convergência preditiva em tempo real.',
+      winProbability: 10,
       triggerType: 'default_ai',
       engineMetrics: emptyMetrics,
       entrySignal: 'AGUARDAR CONFIRMAÇÃO',
-      entryReason: `🌱 GERMINAÇÃO: Semeando histórico analítico para calibração dos motores (${history.length}/50 giros).`,
+      entryReason: '🌱 MESA PRONTA: Insira o primeiro número para iniciar os cálculos analíticos da IA.',
       targetSelectionMode: 'Concentrado',
       isHoraDeJogar: false,
       isSecondPayFilterActive: false,
