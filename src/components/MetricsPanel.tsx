@@ -24,7 +24,7 @@ interface MetricsPanelProps {
 }
 
 export default function MetricsPanel({ history }: MetricsPanelProps) {
-  const lastSpins = useMemo(() => history.map((h) => h.number), [history]);
+  const lastSpins = useMemo(() => (Array.isArray(history) ? history : []).map((h) => h?.number ?? 0), [history]);
 
   // 1. Sector distributions
   const sectorData = useMemo(() => {
@@ -359,7 +359,7 @@ export default function MetricsPanel({ history }: MetricsPanelProps) {
                   <div className="flex items-center gap-1.5">
                     <span className="text-[9px] text-slate-400 font-black uppercase shrink-0">Atração Mesma Cor:</span>
                     <div className="flex items-center gap-1">
-                      {vibe.colorResonanceTargets.map((num) => (
+                      {(vibe?.colorResonanceTargets || []).map((num) => (
                         <span key={`color-target-${num}`} className={`px-2 py-0.5 text-white font-mono font-black text-[10px] rounded shadow-xs ${COLORS[num] === 'red' ? 'bg-red-600' : COLORS[num] === 'black' ? 'bg-slate-800' : 'bg-emerald-600'}`}>
                           {num}
                         </span>

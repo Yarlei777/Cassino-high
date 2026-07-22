@@ -105,8 +105,8 @@ export function getSectorName(key: string): string {
 
 export function suggestTargets(
   history: number[],
-  count: 3 | 4,
-  strategy: 'terminals' | 'frequency' | 'opposite' | 'sectors' | 'signature' | 'manual' | 'default'
+  count: number = 3,
+  strategy: 'terminals' | 'frequency' | 'opposite' | 'sectors' | 'signature' | 'manual' | 'default' = 'default'
 ): number[] {
   if (!history || history.length === 0) {
     // Return high-coverage standard targets if history is empty

@@ -55,24 +55,49 @@ import {
 
 let sharedAudioCtx: AudioContext | null = null;
 
+const safeStorage = {
+  getItem: (key: string): string | null => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        return window.localStorage.getItem(key);
+      }
+    } catch (e) {
+      console.warn(`localStorage.getItem failed for ${key}:`, e);
+    }
+    return null;
+  },
+  setItem: (key: string, value: string): void => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, value);
+      }
+    } catch (e) {
+      console.warn(`localStorage.setItem failed for ${key}:`, e);
+    }
+  },
+  removeItem: (key: string): void => {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.removeItem(key);
+      }
+    } catch (e) {
+      console.warn(`localStorage.removeItem failed for ${key}:`, e);
+    }
+  },
+};
+
 export default function App() {
   // Application tabs
   const [activeTab, setActiveTab] = useState<'panel' | 'metrics' | 'history'>('panel');
   
   // Configurations
   const [targetCount, setTargetCount] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_target_count');
-      return saved ? parseInt(saved, 10) : 1; // Default to Tiro Concentrado: 1 target
-    }
-    return 1;
+    const saved = safeStorage.getItem('roulette_target_count');
+    return saved ? parseInt(saved, 10) : 1; // Default to Tiro Concentrado: 1 target
   });
   const [neighborRange, setNeighborRange] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_neighbor_range');
-      return saved ? parseInt(saved, 10) : 9; // Default to Tiro Concentrado: 9 neighbors per side (19 Números no total)
-    }
-    return 9;
+    const saved = safeStorage.getItem('roulette_neighbor_range');
+    return saved ? parseInt(saved, 10) : 9; // Default to Tiro Concentrado: 9 neighbors per side (19 Números no total)
   });
   const gameMode = `${targetCount}-targets-${neighborRange}-neighbors`;
   const [ballDirection, setBallDirection] = useState<'cw' | 'ccw'>('cw'); // 'cw' = horário, 'ccw' = anti-horário
@@ -83,29 +108,25 @@ export default function App() {
   
   // Core States
   const [history, setHistory] = useState<HistoryEntry[]>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_history');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            return parsed.slice(0, 150);
-          }
-        } catch (e) {
-          console.error('Error parsing saved history:', e);
+    const saved = safeStorage.getItem('roulette_history');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.slice(0, 150);
         }
+      } catch (e) {
+        console.error('Error parsing saved history:', e);
       }
     }
     return [];
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      if (history.length > 0) {
-        localStorage.setItem('roulette_history', JSON.stringify(history));
-      } else {
-        localStorage.removeItem('roulette_history');
-      }
+    if (history.length > 0) {
+      safeStorage.setItem('roulette_history', JSON.stringify(history));
+    } else {
+      safeStorage.removeItem('roulette_history');
     }
   }, [history]);
 
@@ -115,39 +136,24 @@ export default function App() {
   const [showHelpModal, setShowHelpModal] = useState<boolean>(false);
   const [showProfileModal, setShowProfileModal] = useState<boolean>(false);
   const [username, setUsername] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_username');
-      return saved || 'Operador Elite';
-    }
-    return 'Operador Elite';
+    const saved = safeStorage.getItem('roulette_username');
+    return saved || 'Operador Elite';
   });
   const [startingBankrollForGoal, setStartingBankrollForGoal] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_starting_bankroll_goal');
-      return saved ? parseFloat(saved) : 1000;
-    }
-    return 1000;
+    const saved = safeStorage.getItem('roulette_starting_bankroll_goal');
+    return saved ? parseFloat(saved) : 1000;
   });
   const [targetGoal, setTargetGoal] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_target_goal');
-      return saved ? parseFloat(saved) : 5000;
-    }
-    return 5000;
+    const saved = safeStorage.getItem('roulette_target_goal');
+    return saved ? parseFloat(saved) : 5000;
   });
   const [targetDays, setTargetDays] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_target_days');
-      return saved ? parseInt(saved) : 10;
-    }
-    return 10;
+    const saved = safeStorage.getItem('roulette_target_days');
+    return saved ? parseInt(saved) : 10;
   });
   const [managementPlanMode, setManagementPlanMode] = useState<'linear' | 'compound'>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_management_plan_mode');
-      return (saved as 'linear' | 'compound') || 'linear';
-    }
-    return 'linear';
+    const saved = safeStorage.getItem('roulette_management_plan_mode');
+    return (saved as 'linear' | 'compound') || 'linear';
   });
   const [engineFilterMode, setEngineFilterMode] = useState<'essential' | 'complete'>('essential');
   const [dealerChangeRoundCount, setDealerChangeRoundCount] = useState<number>(0);
@@ -160,10 +166,7 @@ export default function App() {
 
   // Safety Mode (Botão de Segurança) states
   const [isSafetyMode, setIsSafetyMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('roulette_safety_mode') === 'true';
-    }
-    return false;
+    return safeStorage.getItem('roulette_safety_mode') === 'true';
   });
   const [isSafetyWaiting, setIsSafetyWaiting] = useState<boolean>(false);
   const [safetyPendingTargets, setSafetyPendingTargets] = useState<number[]>([]);
@@ -171,30 +174,20 @@ export default function App() {
 
   // Modo Análise Contínua (Acende Análise Toda Hora)
   const [isContinuousAnalysis, setIsContinuousAnalysis] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('roulette_continuous_analysis') === 'true';
-    }
-    return false;
+    return safeStorage.getItem('roulette_continuous_analysis') === 'true';
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_continuous_analysis', String(isContinuousAnalysis));
-    }
+    safeStorage.setItem('roulette_continuous_analysis', String(isContinuousAnalysis));
   }, [isContinuousAnalysis]);
 
   // Modo Alavancagem (Fichas mais altas para subir banca rápido com poucos wins)
   const [isLeverageMode, setIsLeverageMode] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('roulette_leverage_mode') === 'true';
-    }
-    return false;
+    return safeStorage.getItem('roulette_leverage_mode') === 'true';
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_leverage_mode', String(isLeverageMode));
-    }
+    safeStorage.setItem('roulette_leverage_mode', String(isLeverageMode));
   }, [isLeverageMode]);
 
   // Estados para colar histórico em lote
@@ -205,104 +198,70 @@ export default function App() {
 
   // Provider Selection State (Padrão, Playtech, Evolution, Pragmatic)
   const [provider, setProvider] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      return localStorage.getItem('roulette_provider') || 'standard';
-    }
-    return 'standard';
+    return safeStorage.getItem('roulette_provider') || 'standard';
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_provider', provider);
-    }
+    safeStorage.setItem('roulette_provider', provider);
   }, [provider]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_safety_mode', String(isSafetyMode));
-    }
+    safeStorage.setItem('roulette_safety_mode', String(isSafetyMode));
   }, [isSafetyMode]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_target_count', targetCount.toString());
-      localStorage.setItem('roulette_neighbor_range', neighborRange.toString());
-    }
+    safeStorage.setItem('roulette_target_count', targetCount.toString());
+    safeStorage.setItem('roulette_neighbor_range', neighborRange.toString());
   }, [targetCount, neighborRange]);
 
   // Bankroll and Profit/Loss States
   const [initialBankroll, setInitialBankroll] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_initial_bankroll');
-      return saved ? parseFloat(saved) : 100;
-    }
-    return 100;
+    const saved = safeStorage.getItem('roulette_initial_bankroll');
+    return saved ? parseFloat(saved) : 100;
   });
 
   const [currentBankroll, setCurrentBankroll] = useState<number>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_current_bankroll');
-      return saved ? parseFloat(saved) : 100;
-    }
-    return 100;
+    const saved = safeStorage.getItem('roulette_current_bankroll');
+    return saved ? parseFloat(saved) : 100;
   });
 
   const [isEditingBankroll, setIsEditingBankroll] = useState<boolean>(false);
   const [bankrollInputVal, setBankrollInputVal] = useState<string>('');
   const [aiRiskProfile, setAiRiskProfile] = useState<'conservative' | 'moderate' | 'aggressive'>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('roulette_ai_risk_profile');
-      return (saved as 'conservative' | 'moderate' | 'aggressive') || 'moderate';
-    }
-    return 'moderate';
+    const saved = safeStorage.getItem('roulette_ai_risk_profile');
+    return (saved as 'conservative' | 'moderate' | 'aggressive') || 'moderate';
   });
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_ai_risk_profile', aiRiskProfile);
-    }
+    safeStorage.setItem('roulette_ai_risk_profile', aiRiskProfile);
   }, [aiRiskProfile]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_initial_bankroll', initialBankroll.toString());
-    }
+    safeStorage.setItem('roulette_initial_bankroll', initialBankroll.toString());
   }, [initialBankroll]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_current_bankroll', currentBankroll.toString());
-    }
+    safeStorage.setItem('roulette_current_bankroll', currentBankroll.toString());
   }, [currentBankroll]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_username', username);
-    }
+    safeStorage.setItem('roulette_username', username);
   }, [username]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_starting_bankroll_goal', startingBankrollForGoal.toString());
-    }
+    safeStorage.setItem('roulette_starting_bankroll_goal', startingBankrollForGoal.toString());
   }, [startingBankrollForGoal]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_target_goal', targetGoal.toString());
-    }
+    safeStorage.setItem('roulette_target_goal', targetGoal.toString());
   }, [targetGoal]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_target_days', targetDays.toString());
-    }
+    safeStorage.setItem('roulette_target_days', targetDays.toString());
   }, [targetDays]);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('roulette_management_plan_mode', managementPlanMode);
-    }
+    safeStorage.setItem('roulette_management_plan_mode', managementPlanMode);
   }, [managementPlanMode]);
 
   // Chip calculation based on bankroll, AI Risk Profile selection, and Leverage Mode
@@ -1588,7 +1547,7 @@ export default function App() {
                           ? 'text-zinc-300 bg-zinc-800 border-zinc-700' 
                           : 'text-emerald-400 bg-emerald-950/20 border-emerald-900/40'
                       }`}>
-                        {pull}
+                        {String(pull)}
                       </span>
                     ))}
                   </div>

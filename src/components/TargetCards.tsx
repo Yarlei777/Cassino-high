@@ -9,10 +9,11 @@ interface TargetCardsProps {
 }
 
 export default function TargetCards({ activeTargets, neighborRange, prevStrongestTarget }: TargetCardsProps) {
+  const safeTargets = activeTargets || [];
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-      {activeTargets.map((target, idx) => {
-        const isTerminal2Camouflage = activeTargets.includes(20) && (activeTargets.includes(2) || activeTargets.includes(12) || activeTargets.includes(22) || activeTargets.includes(32));
+      {safeTargets.map((target, idx) => {
+        const isTerminal2Camouflage = safeTargets.includes(20) && (safeTargets.includes(2) || safeTargets.includes(12) || safeTargets.includes(22) || safeTargets.includes(32));
         const currentNeighborRange = (target === 20 && isTerminal2Camouflage) ? 1 : neighborRange;
         const neighbors = getNeighbors(target, currentNeighborRange);
         const terminal = getTerminal(target);

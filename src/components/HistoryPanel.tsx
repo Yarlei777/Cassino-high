@@ -413,16 +413,16 @@ export default function HistoryPanel({ history, onClearHistory, onGenerateDemoDa
                       <td className="py-2.5 px-3">
                         <div className="flex items-center gap-1 flex-wrap">
                           {(() => {
-                            const targets = (entry as any).hasDynamicPrediction !== undefined 
+                            const targets = ((entry as any).hasDynamicPrediction !== undefined 
                               ? (entry as any).dynamicTargets 
-                              : entry.targets;
-                            const covered = (entry as any).hasDynamicPrediction !== undefined 
+                              : entry.targets) || [];
+                            const covered = ((entry as any).hasDynamicPrediction !== undefined 
                               ? (entry as any).dynamicCovered 
-                              : entry.coveredNumbers;
+                              : entry.coveredNumbers) || [];
 
                             return targets.map((tgt, tIdx) => {
                               const isExactHit = tgt === entry.number;
-                              const isNeighborHit = !isExactHit && covered.includes(entry.number);
+                              const isNeighborHit = !isExactHit && (covered || []).includes(entry.number);
                               return (
                                 <span
                                   key={`${entry.id}-target-${tgt}-${tIdx}`}

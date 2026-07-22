@@ -488,7 +488,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                     )}
                   </div>
 
-                  {simplePatterns.bateEVoltaRegiao.active ? (
+                  {simplePatterns?.bateEVoltaRegiao?.active ? (
                     <div className="space-y-2">
                       <p className="text-[10px] text-slate-700 font-bold">
                         {simplePatterns.bateEVoltaRegiao.description}
@@ -498,7 +498,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                       <div className="bg-white p-2 rounded-lg border border-slate-200 text-[9.5px] font-mono text-slate-700 space-y-1 shadow-xs">
                         <div className="text-[8px] text-slate-400 uppercase font-black">Sequência da Oscilação:</div>
                         <div className="flex flex-wrap gap-1">
-                          {simplePatterns.bateEVoltaRegiao.sequence.map((item, i) => (
+                          {(simplePatterns.bateEVoltaRegiao.sequence || []).map((item, i) => (
                             <span key={`bvr-seq-${i}`} className="bg-emerald-50 text-emerald-800 border border-emerald-200 px-1.5 py-0.5 rounded font-black text-[9px]">
                               {item}
                             </span>
@@ -512,7 +512,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                         <div className="flex justify-between items-center gap-1.5">
                           <span className="text-[10px] font-extrabold text-slate-900">{simplePatterns.bateEVoltaRegiao.recommendedSector}</span>
                           <button
-                            onClick={() => onApplyTargets(simplePatterns.bateEVoltaRegiao.targets, 2, `Bate e Volta Região: ${simplePatterns.bateEVoltaRegiao.recommendedSector}`)}
+                            onClick={() => onApplyTargets(simplePatterns.bateEVoltaRegiao.targets || [], 2, `Bate e Volta Região: ${simplePatterns.bateEVoltaRegiao.recommendedSector}`)}
                             className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[8.5px] uppercase tracking-wider py-1 px-2 rounded cursor-pointer transition-all shrink-0"
                           >
                             Ativar Alvos
@@ -520,7 +520,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                         </div>
                       </div>
                     </div>
-                  ) : simplePatterns.bateEVolta.active ? (
+                  ) : simplePatterns?.bateEVolta?.active ? (
                     <div className="space-y-2">
                       <p className="text-[10px] text-slate-600 font-medium">
                         Alternância de <strong>{simplePatterns.bateEVolta.description}</strong>.
@@ -529,7 +529,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                       <div className="flex items-center gap-1.5 bg-white p-1.5 rounded-lg border border-slate-200 shadow-xs">
                         <span className="text-[8px] text-slate-400 uppercase font-extrabold">Fluxo:</span>
                         <div className="flex gap-1">
-                          {simplePatterns.bateEVolta.sequence.map((term, i) => (
+                          {(simplePatterns.bateEVolta.sequence || []).map((term, i) => (
                             <span key={`seq-term-${i}`} className="text-xs font-bold text-slate-700">{term}</span>
                           ))}
                         </div>
@@ -539,7 +539,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                         <div className="flex justify-between items-center gap-1.5">
                           <span className="text-[10px] font-bold text-slate-800">Seguir {simplePatterns.bateEVolta.recommendedPlay}</span>
                           <button
-                            onClick={() => onApplyTargets(simplePatterns.bateEVolta.targets.slice(0, 5), 2, `Bate e Volta: ${simplePatterns.bateEVolta.recommendedPlay}`)}
+                            onClick={() => onApplyTargets((simplePatterns.bateEVolta.targets || []).slice(0, 5), 2, `Bate e Volta: ${simplePatterns.bateEVolta.recommendedPlay}`)}
                             className="bg-emerald-600 hover:bg-emerald-500 text-white font-black text-[8.5px] uppercase tracking-wider py-1 px-2 rounded cursor-pointer transition-all shrink-0"
                           >
                             Ativar Cores
@@ -721,7 +721,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                           </p>
                         </div>
                         <div className="mt-2.5 flex items-center gap-1 flex-wrap">
-                          {simplePatterns.previsaoDobraRetorno.targetsTerminal.map(n => (
+                          {(simplePatterns?.previsaoDobraRetorno?.targetsTerminal || []).map(n => (
                             <span key={`dobra-term-${n}`} className="text-[9px] font-mono font-bold bg-slate-50 text-slate-800 border border-slate-200 w-5 h-5 rounded-full flex items-center justify-center shadow-xs">
                               {n}
                             </span>
@@ -753,7 +753,7 @@ export default function PatternDetector({ historyNumbers, onApplyTargets }: Patt
                           </p>
                         </div>
                         <div className="mt-2.5 flex items-center gap-1 flex-wrap">
-                          {simplePatterns.previsaoDobraRetorno.targetsRegion.slice(0, 5).map(n => (
+                          {(simplePatterns?.previsaoDobraRetorno?.targetsRegion || []).slice(0, 5).map(n => (
                             <span key={`dobra-reg-${n}`} className="text-[9px] font-mono font-bold bg-slate-50 text-slate-800 border border-slate-200 w-5 h-5 rounded-full flex items-center justify-center shadow-xs">
                               {n}
                             </span>
